@@ -53,8 +53,8 @@ static char const help_str[] =
     "Commands are Case Insensitive\r\n"
     "Use Backspace Key (BS) for Correction\r\n"
     "Use the DISP command to desplay all options\r\n"
-    "Insert Jumper J4 and Connect GPS for APRS Operation\r\n"
-    "Insert Jumper J5 and Connect to Terminal for Command Interpreter\r\n"
+    "Connect GPS for APRS Operation, (GP4/GP5/9600bps)\r\n"
+    "Connect to Terminal for Command Interpreter, (USB serial or GP0/GP1/115200bps)\r\n"
     "\r\n"
     "Commands (with example):\r\n"
     "MYCALL (mycall jn1dff-2)\r\n"
@@ -66,10 +66,11 @@ static char const help_str[] =
     "MYALIAS (myalias RELAY)\r\n"
     "PERM (PERM)\r\n"
     "ECHO (echo on or echo off)\r\n"
-    "GPS (gps $GPGAA or gps $GPGLL or gps $GPRMC)\r\n"
+    "GPS (gps $GPGGA or gps $GPGLL or gps $GPRMC)\r\n"
     "TRace (tr xmit or tr rcv) - For debugging only\r\n"
     "TXDELAY (txdelay n 0<n<201 n is number of delay flags to send)\r\n"
     "CALIBRATE (Calibrate Mode - Testing Only)\r\n"
+    "CONverse (con)\r\n"
     "\r\n";
 
 

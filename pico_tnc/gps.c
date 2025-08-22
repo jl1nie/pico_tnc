@@ -55,13 +55,14 @@ static int gps_idx = 0;
 #define DEL '\x7f'
 #define BELL '\a'
 
+
 static void gps_send(uint8_t *buf, int len)
 {
     static uint32_t gps_timer = 0;
 
     if (tnc_time() - gps_timer < GPS_INTERVAL) return;
 
-    if ((param.gps == GPGGA && !strncmp("$GPGAA", buf, 6))
+    if ((param.gps == GPGGA && !strncmp("$GPGGA", buf, 6))
         || (param.gps == GPGLL && !strncmp("$GPGLL", buf, 6))
         || (param.gps == GPRMC && !strncmp("$GPRMC", buf, 6))) {
 
