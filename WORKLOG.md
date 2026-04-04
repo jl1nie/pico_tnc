@@ -73,3 +73,29 @@ Convert separated `help.c` handling to non-blocking one-line-at-a-time output.
 ### Risks / TODO
 - Help output now spans multiple main-loop iterations; on very slow links, completion timing depends on loop cadence.
 - Design assumes each help line is sufficiently shorter than `QUEUE_SIZE`.
+
+## 2026-04-04
+
+### Request
+Generate UTF-8→Shift_JIS (JIS X 0208 level-1 kanji) C code table using PHP `mb_convert_encoding()`, keep output readable with 8 entries per line, add visible character comments, and place generated files under `./pico_tnc`.
+
+### Files changed
+- `tools/gen_sjis_level1_table.php`
+- `pico_tnc/sjis_level1_table.h`
+- `pico_tnc/sjis_level1_table.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- Added PHP generator that filters to Shift_JIS level-1 range (`0x889F` to `0x9872`) with UTF-8 round-trip validation.
+- Generator now writes both generated files to `./pico_tnc` (`sjis_level1_table.h`, `sjis_level1_table.c`).
+- Generated C table keeps 8 initializers per line and inserts one human-readable comment line (`// 文字 ...`) per 8-entry block.
+- No runtime firmware behavior changes yet (data only; not wired into command/IO paths).
+
+### Validation
+- Ran `php tools/gen_sjis_level1_table.php` successfully and regenerated `pico_tnc/sjis_level1_table.h` / `pico_tnc/sjis_level1_table.c` (2,965 entries).
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`.
+- Build could not run in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Risks / TODO
+- Table is large; if linked into firmware later, flash/RAM impact should be reviewed at integration time.
+- Generation currently targets SJIS byte-range criteria for first-level kanji; variant-specific requirements may need additional filtering rules.
