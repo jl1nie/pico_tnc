@@ -712,7 +712,11 @@ void cmd(tty_t *ttyp, uint8_t *buf, int len)
     if (matched == 1) {
 
         if (mp->func(ttyp, param, param_len)) {
-            if (!(converse_mode | calibrate_mode)) tty_write_str(ttyp, "\r\nOK\r\n");
+            if (!(converse_mode | calibrate_mode)) {
+                if (!(mp->func == cmd_help && help_is_response_pending())) {
+                    tty_write_str(ttyp, "\r\nOK\r\n");
+                }
+            }
             return;
         }
     }
