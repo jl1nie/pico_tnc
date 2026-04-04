@@ -7,5 +7,8 @@
 #include "tty.h"
 
 bool cmd_help(tty_t *ttyp, uint8_t *buf, int len);
+bool help_handle_command(tty_t *ttyp, uint8_t *buf, int len);
+void help_poll(void);
+bool help_is_response_pending(void);
 
 #endif

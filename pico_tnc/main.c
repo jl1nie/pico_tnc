@@ -56,6 +56,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "serial.h"
 #include "tty.h"
 #include "beacon.h"
+#include "help.h"
 
 #define TIME_10MS (10 * 1000)    // 10 ms = 10 * 1000 us
 
@@ -150,6 +151,9 @@ int main()
 
         // calibrate off
         calibrate();
+
+        // non-blocking help output
+        help_poll();
 
 #ifdef BUSY_PIN
 //        gpio_put(BUSY_PIN, 0);
