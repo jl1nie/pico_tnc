@@ -131,3 +131,32 @@ Add Japanese help text in UTF-8, add `help ja`/`help ja sjis`/`help ja utf8` beh
 ### Risks / TODO
 - Help line conversion uses a fixed 256-byte temporary buffer per output line in `help_poll()`; lines longer than that are truncated to fit.
 - Queue behavior remains line-at-a-time (non-blocking help poll), but SJIS lines may be up to 2 bytes/character and can increase per-line write size relative to ASCII-only help.
+
+## 2026-04-04
+
+### Request
+Refactor Japanese help Shift_JIS output so UTF-8→Shift_JIS conversion is a single path integrated in `help.c`, while keeping generated level-1 kanji table files untouched.
+
+### Files changed
+- `pico_tnc/help.c`
+- `pico_tnc/CMakeLists.txt`
+- `pico_tnc/sjis_level1_tablehelp.c` (deleted)
+- `pico_tnc/sjis_level1_tablehelp.h` (deleted)
+- `PLAN.md`
+- `WORKLOG.md`
+
+### Behavior changes
+- Consolidated Japanese help UTF-8→Shift_JIS conversion logic into `help.c` so `help ja sjis` always passes through one conversion path.
+- Japanese UTF-8 source lines are now defined in `help.c` and converted per line only when SJIS mode is selected.
+- Added Katakana range mapping (`U+30A1`..`U+30F6`) to the same conversion function used for hiragana/symbols/level-1 kanji.
+- Unmapped code points still fall back to `?`.
+- Non-blocking `help_poll()` line-by-line send behavior remains unchanged.
+
+### Validation
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`.
+- Build could not run in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Risks / TODO
+- Conversion still uses linear search over the level-1 table per character; acceptable for help text volume but not optimized.
+- Per-line temporary SJIS buffer remains 256 bytes; very long lines are truncated to fit, as before.
+- Queue behavior remains one-line-at-a-time; SJIS lines can consume more bytes per line than UTF-8 ASCII-heavy lines.
