@@ -22,7 +22,6 @@ add_executable(pico_tnc
         beacon.c
         kiss.c
         sjis_level1_table.c
-        sjis_level1_tablehelp.c
         )
 
 pico_generate_pio_header(pico_tnc ${CMAKE_CURRENT_LIST_DIR}/pio_dac.pio)
