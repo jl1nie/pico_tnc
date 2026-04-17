@@ -2,13 +2,13 @@
 
 ## Directory layout
 
-- `include/mona_compat.h`
+- `mona_compat.h`
   - hardware-independent core API
-- `src/mona_compat.c`
+- `mona_compat.c`
   - Base58/Bech32/WIF/address/sign/verify core logic
-- `include/mona_pico_api.h`
+- `mona_pico_api.h`
   - Pico-TNC-friendly thin wrapper around `mona_compat`
-- `src/mona_pico_api.c`
+- `mona_pico_api.c`
   - active address type / raw-or-WIF import helpers
 - `tools/*`
   - PC validation CLI using OpenSSL backend
