@@ -1,0 +1,16 @@
+CC ?= gcc
+CFLAGS ?= -O2 -Wall -Wextra -std=c11
+LDFLAGS ?=
+LDLIBS ?= -lcrypto
+
+all: mona_cli
+
+mona_cli: mona_cli.o mona_compat.o mona_backend_openssl.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
+mona_cli.o: mona_cli.c mona_compat.h mona_backend_openssl.h
+mona_compat.o: mona_compat.c mona_compat.h
+mona_backend_openssl.o: mona_backend_openssl.c mona_compat.h mona_backend_openssl.h
+
+clean:
+	rm -f mona_cli *.o

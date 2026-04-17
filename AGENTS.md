@@ -39,3 +39,7 @@ If the task is part of a multi-step effort, also update `PLAN.md`.
 
 ## Current project-specific plan
 The current planned work around help output is tracked in `PLAN.md`.
+
+## Structural separation
+The contents of libmona_pico should be separated into layers and not mixed together.
+
