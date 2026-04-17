@@ -7,3 +7,11 @@
 - [ ] Validate firmware behavior on hardware (USB terminal responsiveness while help is printing).
 - [x] Consolidate Japanese help UTF-8→SJIS conversion into a single path in `help.c` (including katakana fallback handling).
 - [x] Move UTF-8→Shift_JIS mapping exceptions (hiragana/katakana/symbols) into PHP-generated table so `help.c` keeps decode+lookup+fallback only.
+
+## 2026-04-17
+- [x] Add minimal Monacoin keyslot persistence fields to `param_t` (raw32 + compressed + active type + valid).
+- [x] Add `privkey gen [m|p|mona1|p2pkh|p2sh|p2wpkh]` to generate/store keyslot seed.
+- [x] Add `privkey set <WIF or RAW>` to import/store keyslot with typed-WIF active type normalization.
+- [x] Add `privkey show` with interactive confirmation and persisted-key display.
+- [ ] Add `privkey type` command set.
+- [ ] Add Pico crypto backend and wire sign/verify commands.

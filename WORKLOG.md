@@ -2,6 +2,97 @@
 
 This file tracks implementation work, validation, and remaining risks.
 
+## 2026-04-17
+
+### Summary
+Added `privkey show` with an interactive safety prompt so key persistence can be tested end-to-end (write/import then read/display) without introducing full signing backend integration.
+
+### Files changed
+- `pico_tnc/cmd.h`
+- `pico_tnc/tty.c`
+- `pico_tnc/cmd.c`
+- `pico_tnc/mona_backend_minimal.h`
+- `pico_tnc/mona_backend_minimal.c`
+- `pico_tnc/CMakeLists.txt`
+- `pico_tnc/help.c`
+- `README.md`
+- `README_JP.md`
+- `PLAN.md`
+- `WORKLOG.md`
+
+### Behavior changes
+- Added `privkey show` command:
+  - prints SECURITY NOTICE and waits for one key input.
+  - Enter (`CR`) proceeds and prints key data.
+  - any other key aborts and prints `Aborted by user.`.
+- Added pending-input handling hooks in `cmd`/`tty` so confirmation can be handled before normal command parsing resumes.
+- Added minimal mona crypto bootstrap (`mona_backend_minimal_init()`):
+  - provides SHA-256 only (sufficient for WIF Base58Check encode/decode used by `set`/`show`).
+  - keeps RIPEMD160/HMAC/secp funcs as unsupported stubs (no sign/verify enablement in this step).
+- `privkey show` output now includes:
+  - typed WIFs for `p2pkh`, `p2sh` (`p2wpkh-p2sh:`), `p2wpkh` (`p2wpkh:`)
+  - raw hex key
+  - active type
+  - address lines are explicitly marked unavailable in this stage.
+
+### Validation status
+- Static checks:
+  - command table includes `PRIVKEY` and `show/gen/set` paths.
+  - pending-input interception path is wired in `tty_input()`.
+  - build list includes `mona_backend_minimal.c` and excludes `tools/*`.
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`, but full build verification could not complete because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured in this environment.
+
+### Remaining risks / TODO
+- Address derivation is intentionally deferred until secp+hash backend is implemented; `show` currently prints address lines as unavailable.
+- Minimal backend currently supports only SHA-256 needed for WIF encode/decode; sign/verify path remains intentionally disabled.
+
+## 2026-04-17
+
+### Summary
+Implemented the first staged integration step for `libmona_pico` keyslot persistence without adding signing/verification runtime dependencies:
+- extended persistent settings with minimal Monacoin keyslot fields (raw 32-byte secret, valid flag, compressed flag, active address type)
+- added `privkey gen [m|p|mona1|p2pkh|p2sh|p2wpkh]`
+- added `privkey set <WIF or RAW>`
+- integrated only required `libmona_pico` core/adapter sources into firmware build (`tools/*` remains excluded)
+
+### Files changed
+- `pico_tnc/tnc.h`
+- `pico_tnc/tnc.c`
+- `pico_tnc/cmd.c`
+- `pico_tnc/help.c`
+- `pico_tnc/CMakeLists.txt`
+- `README.md`
+- `README_JP.md`
+- `PLAN.md`
+- `WORKLOG.md`
+
+### Behavior changes
+- New command `privkey gen [type]`:
+  - generates a random 32-byte secret and stores it in `param`.
+  - stores `compressed=true` and normalized active type (`p2pkh`/`p2sh`/`p2wpkh`).
+  - supports aliases `m`, `p`, `mona1`.
+- New command `privkey set <WIF or RAW>`:
+  - imports typed/untyped WIF or 64-hex raw key using `mona_pico_api`.
+  - typed WIF updates active type from prefix.
+  - untyped WIF and RAW keep the existing active type; if no prior key exists, default type is `p2pkh`.
+- Persistence format remains minimal:
+  - `mona_privkey[32]`
+  - `mona_privkey_valid`
+  - `mona_privkey_compressed`
+  - `mona_active_type`
+- No WIF/address strings are persisted.
+
+### Validation status
+- Command-level static validation by source review:
+  - alias normalization is handled via `mona_parse_addr_type()`.
+  - typed WIF policy (`keep_active_type_if_untyped=true`) is wired in `cmd_privkey`.
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`, but this environment still lacks `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`), so full firmware build verification could not complete.
+
+### Remaining risks / TODO
+- Random secret generation currently checks only for all-zero and does not enforce secp256k1 curve-order bounds; tighten after backend/sign path integration.
+- Existing flash records created by older firmware may contain `0xff` in newly added fields; startup sanitization now clamps invalid values to safe defaults.
+- `privkey show`/`privkey type` and sign/verify command surfaces are not implemented in this step.
+
 ## 2026-04-05
 
 ### Summary

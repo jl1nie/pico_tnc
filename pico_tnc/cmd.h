@@ -37,3 +37,5 @@ extern uint8_t calibrate_idx;
 
 void cmd(tty_t *ttyp, uint8_t *buf, int len);
 void calibrate(void);
+bool cmd_has_pending_input(void);
+bool cmd_consume_pending_input(tty_t *ttyp, int ch);

@@ -48,6 +48,10 @@ param_t param = {
     .mon = 0,
     .digi = 0,
     .beacon = 0,
+    .mona_privkey = { 0, },
+    .mona_privkey_valid = 0,
+    .mona_privkey_compressed = 1,
+    .mona_active_type = MONA_ACTIVE_P2PKH,
 };
 
 void tnc_init(void)
@@ -112,6 +116,9 @@ void tnc_init(void)
     //printf("DELAYED_N = %d\n", DELAYED_N);
 
     // read flash
+    // NOTE:
+    // param_t layout was extended for Monacoin keyslot persistence.
+    // Existing firmware data without these fields may leave 0xff in new bytes.
     flash_read(&param, sizeof(param));
 
     if (param.txdelay > 1000) {
@@ -127,6 +134,18 @@ void tnc_init(void)
 
     if (param.axhang > 1000) {
         param.axhang = 1000;
+    }
+
+    if (param.mona_privkey_valid > 1) {
+        param.mona_privkey_valid = 0;
+    }
+
+    if (param.mona_privkey_compressed > 1) {
+        param.mona_privkey_compressed = 1;
+    }
+
+    if (param.mona_active_type > MONA_ACTIVE_P2WPKH) {
+        param.mona_active_type = MONA_ACTIVE_P2PKH;
     }
 
     // set kiss txdelay

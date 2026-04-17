@@ -193,6 +193,12 @@ enum GPS_SENTENCE {
 #define UNPROTO_N 4
 #define BTEXT_LEN 100
 
+typedef enum {
+    MONA_ACTIVE_P2PKH = 0,
+    MONA_ACTIVE_P2SH = 1,
+    MONA_ACTIVE_P2WPKH = 2,
+} mona_active_type_t;
+
 
 // TNC parameter
 typedef struct TNC_PARAM {
@@ -208,6 +214,10 @@ typedef struct TNC_PARAM {
     uint8_t digi;
     uint8_t beacon;
     uint8_t echo;
+    uint8_t mona_privkey[32];
+    uint8_t mona_privkey_valid;
+    uint8_t mona_privkey_compressed;
+    uint8_t mona_active_type;
 } param_t;
 
 extern param_t param;

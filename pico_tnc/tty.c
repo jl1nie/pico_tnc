@@ -163,6 +163,13 @@ void tty_input(tty_t *ttyp, int ch)
         return;
     }
 
+    if (cmd_has_pending_input()) {
+        if (cmd_consume_pending_input(ttyp, ch)) {
+            ttyp->cmd_idx = 0;
+            return;
+        }
+    }
+
     switch (ch) {
         case FEND: // KISS frame end
             kiss_input(ttyp, ch);
