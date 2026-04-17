@@ -42,6 +42,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "receive.h"
 #include "beacon.h"
 #include "help.h"
+#include "libmona_pico/mona_pico_api.h"
+#include "mona_backend_minimal.h"
 
 typedef struct CMD {
     uint8_t *name;
@@ -71,6 +73,14 @@ bool converse_mode = false;
 // indicate calibrate mode
 bool calibrate_mode = false;
 uint8_t calibrate_idx = 0;
+
+typedef enum {
+    PRIVKEY_SHOW_IDLE = 0,
+    PRIVKEY_SHOW_WAIT_CONFIRM,
+} privkey_show_state_t;
+
+static privkey_show_state_t privkey_show_state = PRIVKEY_SHOW_IDLE;
+static tty_t *privkey_show_ttyp = NULL;
 
 static uint8_t *read_call(uint8_t *buf, callsign_t *c)
 {
@@ -641,6 +651,224 @@ static bool cmd_kiss(tty_t *ttyp, uint8_t *buf, int len)
     return true;
 }
 
+static uint8_t *skip_spaces(uint8_t *p)
+{
+    while (p && *p == ' ') p++;
+    return p;
+}
+
+static mona_addr_type_t mona_param_to_addr_type(uint8_t t)
+{
+    if (t == MONA_ACTIVE_P2SH) return MONA_ADDR_P2SH;
+    if (t == MONA_ACTIVE_P2WPKH) return MONA_ADDR_P2WPKH;
+    return MONA_ADDR_P2PKH;
+}
+
+static uint8_t mona_addr_type_to_param(mona_addr_type_t t)
+{
+    if (t == MONA_ADDR_P2SH) return MONA_ACTIVE_P2SH;
+    if (t == MONA_ADDR_P2WPKH) return MONA_ACTIVE_P2WPKH;
+    return MONA_ACTIVE_P2PKH;
+}
+
+static const char *mona_param_type_name(uint8_t t)
+{
+    if (t == MONA_ACTIVE_P2SH) return "p2sh";
+    if (t == MONA_ACTIVE_P2WPKH) return "p2wpkh";
+    return "p2pkh";
+}
+
+static void bytes_to_hex(const uint8_t *src, int len, char *out, int out_len)
+{
+    static const char *hex = "0123456789abcdef";
+    int i;
+    int p = 0;
+
+    for (i = 0; i < len && p + 2 < out_len; ++i) {
+        out[p++] = hex[(src[i] >> 4) & 0x0f];
+        out[p++] = hex[src[i] & 0x0f];
+    }
+    out[p] = '\0';
+}
+
+static bool mona_format_wif_for_type(const mona_keyslot_t *slot,
+                                     mona_addr_type_t type,
+                                     const char *typed_prefix,
+                                     char *out,
+                                     size_t out_sz)
+{
+    mona_privkey_t priv;
+    char wif[MONA_WIF_MAX];
+    mona_err_t err;
+
+    memset(&priv, 0, sizeof(priv));
+    memcpy(priv.secret, slot->secret, sizeof(priv.secret));
+    priv.compressed = slot->compressed;
+    priv.txin_type = mona_addr_type_to_txin_type(type);
+
+    err = mona_encode_wif(&priv, wif, sizeof(wif));
+    if (err != MONA_OK) {
+        snprintf(out, out_sz, "(unavailable)");
+        return false;
+    }
+
+    if (typed_prefix && typed_prefix[0]) {
+        snprintf(out, out_sz, "%s:%s", typed_prefix, wif);
+    } else {
+        snprintf(out, out_sz, "%s", wif);
+    }
+
+    return true;
+}
+
+static void privkey_show_print_notice(tty_t *ttyp)
+{
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* SECURITY NOTICE !\r\n");
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* This is your secret key.\r\n");
+    tty_write_str(ttyp, "* Never share this data with anyone else!\r\n");
+    tty_write_str(ttyp, "* Please ensure no one is standing behind you.\r\n");
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* Press [Enter] to proceed or any other key to abort.\r\n");
+    tty_write_str(ttyp, "*\r\n");
+}
+
+static void privkey_show_print_body(tty_t *ttyp)
+{
+    mona_keyslot_t slot;
+    char raw_hex[65];
+    char wif_p2pkh[MONA_WIF_MAX + 8];
+    char wif_p2sh[MONA_WIF_MAX + 20];
+    char wif_p2wpkh[MONA_WIF_MAX + 16];
+
+    memset(&slot, 0, sizeof(slot));
+    memcpy(slot.secret, param.mona_privkey, sizeof(slot.secret));
+    slot.valid = param.mona_privkey_valid ? true : false;
+    slot.compressed = param.mona_privkey_compressed ? true : false;
+    slot.active_type = mona_param_to_addr_type(param.mona_active_type);
+
+    bytes_to_hex(slot.secret, 32, raw_hex, sizeof(raw_hex));
+    mona_format_wif_for_type(&slot, MONA_ADDR_P2PKH, "", wif_p2pkh, sizeof(wif_p2pkh));
+    mona_format_wif_for_type(&slot, MONA_ADDR_P2SH, "p2wpkh-p2sh", wif_p2sh, sizeof(wif_p2sh));
+    mona_format_wif_for_type(&slot, MONA_ADDR_P2WPKH, "p2wpkh", wif_p2wpkh, sizeof(wif_p2wpkh));
+
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* KEY WIF:\r\n");
+    tty_write_str(ttyp, "*   p2pkh   : ");
+    tty_write_str(ttyp, wif_p2pkh);
+    tty_write_str(ttyp, "\r\n");
+    tty_write_str(ttyp, "*   p2sh    : ");
+    tty_write_str(ttyp, wif_p2sh);
+    tty_write_str(ttyp, "\r\n");
+    tty_write_str(ttyp, "*   p2wpkh  : ");
+    tty_write_str(ttyp, wif_p2wpkh);
+    tty_write_str(ttyp, "\r\n");
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* KEY RAW:\r\n");
+    tty_write_str(ttyp, "*   ");
+    tty_write_str(ttyp, raw_hex);
+    tty_write_str(ttyp, "\r\n");
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* This is your identification key.\r\n");
+    tty_write_str(ttyp, "* Please be sure to save a backup of it.\r\n");
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* ADDRESS\r\n");
+    tty_write_str(ttyp, "*   p2pkh (M)     : (unavailable in this stage)\r\n");
+    tty_write_str(ttyp, "*   p2sh  (P)     : (unavailable in this stage)\r\n");
+    tty_write_str(ttyp, "*   p2wpkh(mona1) : (unavailable in this stage)\r\n");
+    tty_write_str(ttyp, "*\r\n");
+    tty_write_str(ttyp, "* Active : ");
+    tty_write_str(ttyp, mona_param_type_name(param.mona_active_type));
+    tty_write_str(ttyp, "\r\n");
+}
+
+static bool cmd_privkey(tty_t *ttyp, uint8_t *buf, int len)
+{
+    (void)len;
+    mona_keyslot_t slot;
+    mona_err_t err;
+    uint8_t *p;
+
+    if (!buf || !buf[0]) {
+        tty_write_str(ttyp, "PRIVKEY show, gen [m|p|mona1|p2pkh|p2sh|p2wpkh], set <WIF or RAW>\r\n");
+        return true;
+    }
+
+    p = skip_spaces(buf);
+
+    mona_backend_minimal_init();
+
+    if (!strncasecmp((char *)p, "SHOW", 4) && (p[4] == '\0' || p[4] == ' ')) {
+        if (!param.mona_privkey_valid) return false;
+        privkey_show_print_notice(ttyp);
+        privkey_show_state = PRIVKEY_SHOW_WAIT_CONFIRM;
+        privkey_show_ttyp = ttyp;
+        return true;
+    }
+
+    if (!strncasecmp((char *)p, "GEN", 3) && (p[3] == '\0' || p[3] == ' ')) {
+        mona_addr_type_t t = mona_param_to_addr_type(param.mona_active_type);
+        bool any_non_zero;
+        int i;
+        p = skip_spaces(p + 3);
+
+        if (*p) {
+            err = mona_parse_addr_type((char *)p, &t);
+            if (err != MONA_OK) return false;
+        }
+
+        do {
+            for (i = 0; i < 32; i += 4) {
+                uint32_t r = get_rand_32();
+                memcpy(slot.secret + i, &r, sizeof(r));
+            }
+            any_non_zero = false;
+            for (i = 0; i < 32; ++i) {
+                if (slot.secret[i] != 0) {
+                    any_non_zero = true;
+                    break;
+                }
+            }
+        } while (!any_non_zero);
+
+        err = mona_keyslot_init_from_secret(&slot, slot.secret, t);
+        if (err != MONA_OK) return false;
+
+        memcpy(param.mona_privkey, slot.secret, sizeof(param.mona_privkey));
+        param.mona_privkey_valid = slot.valid ? 1 : 0;
+        param.mona_privkey_compressed = slot.compressed ? 1 : 0;
+        param.mona_active_type = mona_addr_type_to_param(slot.active_type);
+        return true;
+    }
+
+    if (!strncasecmp((char *)p, "SET", 3) && p[3] == ' ') {
+        p = skip_spaces(p + 3);
+        if (!*p) return false;
+
+        memset(&slot, 0, sizeof(slot));
+        if (param.mona_privkey_valid) {
+            memcpy(slot.secret, param.mona_privkey, sizeof(slot.secret));
+            slot.compressed = param.mona_privkey_compressed ? true : false;
+            slot.active_type = mona_param_to_addr_type(param.mona_active_type);
+            slot.valid = true;
+        } else {
+            slot.active_type = MONA_ADDR_P2PKH;
+        }
+
+        err = mona_keyslot_init_from_input(&slot, (char *)p, true);
+        if (err != MONA_OK) return false;
+
+        memcpy(param.mona_privkey, slot.secret, sizeof(param.mona_privkey));
+        param.mona_privkey_valid = slot.valid ? 1 : 0;
+        param.mona_privkey_compressed = slot.compressed ? 1 : 0;
+        param.mona_active_type = mona_addr_type_to_param(slot.active_type);
+        return true;
+    }
+
+    return false;
+}
+
 static void disp_section(tty_t *ttyp, uint8_t const *title)
 {
     tty_write_str(ttyp, "\r\n");
@@ -704,10 +932,41 @@ static const cmd_t cmd_list[] = {
     { "CONVERSE", 8, cmd_converse, },
     { "K", 1, cmd_converse, },
     { "KISS", 4, cmd_kiss, },
+    { "PRIVKEY", 7, cmd_privkey, },
 
     // end mark
     { NULL, 0, NULL, },
 };
+
+bool cmd_has_pending_input(void)
+{
+    return privkey_show_state != PRIVKEY_SHOW_IDLE;
+}
+
+bool cmd_consume_pending_input(tty_t *ttyp, int ch)
+{
+    if (privkey_show_state != PRIVKEY_SHOW_WAIT_CONFIRM) return false;
+    if (ttyp != privkey_show_ttyp) return false;
+    if (ch == '\n') return true;
+
+    if (param.echo) {
+        if (ch >= ' ' && ch <= '~') {
+            tty_write_char(ttyp, ch);
+        }
+        tty_write_str(ttyp, "\r\n");
+    }
+
+    if (ch == '\r') {
+        privkey_show_print_body(ttyp);
+    } else {
+        tty_write_str(ttyp, "Aborted by user.\r\n");
+    }
+
+    privkey_show_state = PRIVKEY_SHOW_IDLE;
+    privkey_show_ttyp = NULL;
+    tty_write_str(ttyp, "cmd: ");
+    return true;
+}
 
 
 void cmd(tty_t *ttyp, uint8_t *buf, int len)
@@ -765,7 +1024,8 @@ void cmd(tty_t *ttyp, uint8_t *buf, int len)
 
         if (mp->func(ttyp, param, param_len)) {
             if (!(converse_mode | calibrate_mode)) {
-                if (!(mp->func == cmd_help && help_is_response_pending())) {
+                if (!(mp->func == cmd_help && help_is_response_pending()) &&
+                    !cmd_has_pending_input()) {
                     tty_write_str(ttyp, "\r\nOK\r\n");
                 }
             }
