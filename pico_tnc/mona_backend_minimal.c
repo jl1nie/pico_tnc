@@ -4,6 +4,8 @@
 #include <string.h>
 
 #include "libmona_pico/mona_compat.h"
+#include "secp256k1.h"
+#include "secp256k1_recovery.h"
 
 typedef struct {
     uint32_t state[8];
@@ -151,12 +153,171 @@ static int sha256_impl(const uint8_t *data, size_t len, uint8_t out32[32])
     return 1;
 }
 
-static int not_supported_160(const uint8_t *data, size_t len, uint8_t out20[20])
+typedef struct {
+    uint32_t h[5];
+    uint64_t total_len;
+    uint8_t block[64];
+    size_t block_len;
+} ripemd160_ctx_t;
+
+static inline uint32_t rol32(uint32_t x, unsigned s) { return (x << s) | (x >> (32 - s)); }
+
+static uint32_t ripemd_f(int j, uint32_t x, uint32_t y, uint32_t z)
 {
-    (void)data;
-    (void)len;
-    (void)out20;
-    return 0;
+    if (j <= 15) return x ^ y ^ z;
+    if (j <= 31) return (x & y) | (~x & z);
+    if (j <= 47) return (x | ~y) ^ z;
+    if (j <= 63) return (x & z) | (y & ~z);
+    return x ^ (y | ~z);
+}
+
+static uint32_t ripemd_k(int j)
+{
+    if (j <= 15) return 0x00000000u;
+    if (j <= 31) return 0x5A827999u;
+    if (j <= 47) return 0x6ED9EBA1u;
+    if (j <= 63) return 0x8F1BBCDCu;
+    return 0xA953FD4Eu;
+}
+
+static uint32_t ripemd_kp(int j)
+{
+    if (j <= 15) return 0x50A28BE6u;
+    if (j <= 31) return 0x5C4DD124u;
+    if (j <= 47) return 0x6D703EF3u;
+    if (j <= 63) return 0x7A6D76E9u;
+    return 0x00000000u;
+}
+
+static const uint8_t RIP_R[80] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,15,
+    7, 4,13, 1,10, 6,15, 3,12, 0, 9, 5, 2,14,11, 8,
+    3,10,14, 4, 9,15, 8, 1, 2, 7, 0, 6,13,11, 5,12,
+    1, 9,11,10, 0, 8,12, 4,13, 3, 7,15,14, 5, 6, 2,
+    4, 0, 5, 9, 7,12, 2,10,14, 1, 3, 8,11, 6,15,13
+};
+
+static const uint8_t RIP_RP[80] = {
+     5,14, 7, 0, 9, 2,11, 4,13, 6,15, 8, 1,10, 3,12,
+     6,11, 3, 7, 0,13, 5,10,14,15, 8,12, 4, 9, 1, 2,
+    15, 5, 1, 3, 7,14, 6, 9,11, 8,12, 2,10, 0, 4,13,
+     8, 6, 4, 1, 3,11,15, 0, 5,12, 2,13, 9, 7,10,14,
+    12,15,10, 4, 1, 5, 8, 7, 6, 2,13,14, 0, 3, 9,11
+};
+
+static const uint8_t RIP_S[80] = {
+    11,14,15,12, 5, 8, 7, 9,11,13,14,15, 6, 7, 9, 8,
+     7, 6, 8,13,11, 9, 7,15, 7,12,15, 9,11, 7,13,12,
+    11,13, 6, 7,14, 9,13,15,14, 8,13, 6, 5,12, 7, 5,
+    11,12,14,15,14,15, 9, 8, 9,14, 5, 6, 8, 6, 5,12,
+     9,15, 5,11, 6, 8,13,12, 5,12,13,14,11, 8, 5, 6
+};
+
+static const uint8_t RIP_SP[80] = {
+     8, 9, 9,11,13,15,15, 5, 7, 7, 8,11,14,14,12, 6,
+     9,13,15, 7,12, 8, 9,11, 7, 7,12, 7, 6,15,13,11,
+     9, 7,15,11, 8, 6, 6,14,12,13, 5,14,13,13, 7, 5,
+    15, 5, 8,11,14,14, 6,14, 6, 9,12, 9,12, 5,15, 8,
+     8, 5,12, 9,12, 5,14, 6, 8,13, 6, 5,15,13,11,11
+};
+
+static void ripemd160_compress(ripemd160_ctx_t *ctx, const uint8_t block[64])
+{
+    uint32_t x[16];
+    uint32_t al, bl, cl, dl, el;
+    uint32_t ar, br, cr, dr, er;
+    uint32_t t;
+    int j;
+
+    for (j = 0; j < 16; ++j) {
+        x[j] = (uint32_t)block[j * 4] |
+               ((uint32_t)block[j * 4 + 1] << 8) |
+               ((uint32_t)block[j * 4 + 2] << 16) |
+               ((uint32_t)block[j * 4 + 3] << 24);
+    }
+
+    al = ar = ctx->h[0];
+    bl = br = ctx->h[1];
+    cl = cr = ctx->h[2];
+    dl = dr = ctx->h[3];
+    el = er = ctx->h[4];
+
+    for (j = 0; j < 80; ++j) {
+        t = rol32(al + ripemd_f(j, bl, cl, dl) + x[RIP_R[j]] + ripemd_k(j), RIP_S[j]) + el;
+        al = el; el = dl; dl = rol32(cl, 10); cl = bl; bl = t;
+        t = rol32(ar + ripemd_f(79 - j, br, cr, dr) + x[RIP_RP[j]] + ripemd_kp(j), RIP_SP[j]) + er;
+        ar = er; er = dr; dr = rol32(cr, 10); cr = br; br = t;
+    }
+
+    t = ctx->h[1] + cl + dr;
+    ctx->h[1] = ctx->h[2] + dl + er;
+    ctx->h[2] = ctx->h[3] + el + ar;
+    ctx->h[3] = ctx->h[4] + al + br;
+    ctx->h[4] = ctx->h[0] + bl + cr;
+    ctx->h[0] = t;
+}
+
+static void ripemd160_init(ripemd160_ctx_t *ctx)
+{
+    ctx->h[0] = 0x67452301u;
+    ctx->h[1] = 0xEFCDAB89u;
+    ctx->h[2] = 0x98BADCFEu;
+    ctx->h[3] = 0x10325476u;
+    ctx->h[4] = 0xC3D2E1F0u;
+    ctx->total_len = 0;
+    ctx->block_len = 0;
+}
+
+static void ripemd160_update(ripemd160_ctx_t *ctx, const uint8_t *data, size_t len)
+{
+    ctx->total_len += len;
+    while (len > 0) {
+        size_t take = 64 - ctx->block_len;
+        if (take > len) take = len;
+        memcpy(ctx->block + ctx->block_len, data, take);
+        ctx->block_len += take;
+        data += take;
+        len -= take;
+        if (ctx->block_len == 64) {
+            ripemd160_compress(ctx, ctx->block);
+            ctx->block_len = 0;
+        }
+    }
+}
+
+static void ripemd160_final(ripemd160_ctx_t *ctx, uint8_t out20[20])
+{
+    uint64_t bits = ctx->total_len * 8u;
+    size_t i;
+
+    ctx->block[ctx->block_len++] = 0x80u;
+    if (ctx->block_len > 56) {
+        while (ctx->block_len < 64) ctx->block[ctx->block_len++] = 0;
+        ripemd160_compress(ctx, ctx->block);
+        ctx->block_len = 0;
+    }
+    while (ctx->block_len < 56) ctx->block[ctx->block_len++] = 0;
+    for (i = 0; i < 8; ++i) {
+        ctx->block[56 + i] = (uint8_t)(bits >> (8 * i));
+    }
+    ripemd160_compress(ctx, ctx->block);
+
+    for (i = 0; i < 5; ++i) {
+        out20[i * 4] = (uint8_t)(ctx->h[i] & 0xffu);
+        out20[i * 4 + 1] = (uint8_t)((ctx->h[i] >> 8) & 0xffu);
+        out20[i * 4 + 2] = (uint8_t)((ctx->h[i] >> 16) & 0xffu);
+        out20[i * 4 + 3] = (uint8_t)((ctx->h[i] >> 24) & 0xffu);
+    }
+}
+
+static int ripemd160_impl(const uint8_t *data, size_t len, uint8_t out20[20])
+{
+    ripemd160_ctx_t ctx;
+    if (!data || !out20) return 0;
+    ripemd160_init(&ctx);
+    ripemd160_update(&ctx, data, len);
+    ripemd160_final(&ctx, out20);
+    return 1;
 }
 
 static int not_supported_hmac(const uint8_t *key, size_t key_len,
@@ -178,56 +339,75 @@ static int not_supported_rng(uint8_t *out, size_t len)
     return 0;
 }
 
-static int not_supported_pub(const uint8_t secret32[32], uint8_t out33[33])
+static secp256k1_context *g_secp_ctx = NULL;
+
+static secp256k1_context *secp_get_ctx(void)
 {
-    (void)secret32;
-    (void)out33;
-    return 0;
+    if (!g_secp_ctx) {
+        g_secp_ctx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN | SECP256K1_CONTEXT_VERIFY);
+    }
+    return g_secp_ctx;
 }
 
-static int not_supported_sign(const uint8_t msg32[32],
-                              const uint8_t secret32[32],
-                              uint8_t out64[64],
-                              int *out_recid)
+static int secp_pubkey_create_compressed_impl(const uint8_t secret32[32], uint8_t out33[33])
 {
-    (void)msg32;
-    (void)secret32;
-    (void)out64;
-    (void)out_recid;
-    return 0;
+    secp256k1_pubkey pubkey;
+    size_t out_len = 33;
+    secp256k1_context *ctx = secp_get_ctx();
+    if (!ctx || !secret32 || !out33) return 0;
+    if (!secp256k1_ec_pubkey_create(ctx, &pubkey, secret32)) return 0;
+    return secp256k1_ec_pubkey_serialize(ctx, out33, &out_len, &pubkey, SECP256K1_EC_COMPRESSED);
 }
 
-static int not_supported_recover(const uint8_t msg32[32],
-                                 const uint8_t sig64[64],
-                                 int recid,
-                                 uint8_t out33[33])
+static int secp_sign_recoverable_compact_impl(const uint8_t msg32[32],
+                                              const uint8_t secret32[32],
+                                              uint8_t out64[64],
+                                              int *out_recid)
 {
-    (void)msg32;
-    (void)sig64;
-    (void)recid;
-    (void)out33;
-    return 0;
+    secp256k1_ecdsa_recoverable_signature sig;
+    secp256k1_context *ctx = secp_get_ctx();
+    if (!ctx || !msg32 || !secret32 || !out64 || !out_recid) return 0;
+    if (!secp256k1_ecdsa_sign_recoverable(ctx, &sig, msg32, secret32, NULL, NULL)) return 0;
+    return secp256k1_ecdsa_recoverable_signature_serialize_compact(ctx, out64, out_recid, &sig);
 }
 
-static int not_supported_verify(const uint8_t msg32[32],
-                                const uint8_t sig64[64],
-                                const uint8_t pub33[33])
+static int secp_recover_pubkey_compressed_impl(const uint8_t msg32[32],
+                                               const uint8_t sig64[64],
+                                               int recid,
+                                               uint8_t out33[33])
 {
-    (void)msg32;
-    (void)sig64;
-    (void)pub33;
-    return 0;
+    secp256k1_ecdsa_recoverable_signature sig;
+    secp256k1_pubkey pubkey;
+    size_t out_len = 33;
+    secp256k1_context *ctx = secp_get_ctx();
+    if (!ctx || !msg32 || !sig64 || !out33) return 0;
+    if (!secp256k1_ecdsa_recoverable_signature_parse_compact(ctx, &sig, sig64, recid)) return 0;
+    if (!secp256k1_ecdsa_recover(ctx, &pubkey, &sig, msg32)) return 0;
+    return secp256k1_ec_pubkey_serialize(ctx, out33, &out_len, &pubkey, SECP256K1_EC_COMPRESSED);
+}
+
+static int secp_verify_compact_impl(const uint8_t msg32[32],
+                                    const uint8_t sig64[64],
+                                    const uint8_t pub33[33])
+{
+    secp256k1_ecdsa_signature sig;
+    secp256k1_pubkey pubkey;
+    secp256k1_context *ctx = secp_get_ctx();
+    if (!ctx || !msg32 || !sig64 || !pub33) return 0;
+    if (!secp256k1_ecdsa_signature_parse_compact(ctx, &sig, sig64)) return 0;
+    if (!secp256k1_ec_pubkey_parse(ctx, &pubkey, pub33, 33)) return 0;
+    return secp256k1_ecdsa_verify(ctx, &sig, msg32, &pubkey);
 }
 
 static const mona_crypto_vtable_t g_vt = {
     .sha256 = sha256_impl,
-    .ripemd160 = not_supported_160,
+    .ripemd160 = ripemd160_impl,
     .hmac_sha256 = not_supported_hmac,
     .random_bytes = not_supported_rng,
-    .secp_pubkey_create_compressed = not_supported_pub,
-    .secp_sign_recoverable_compact = not_supported_sign,
-    .secp_recover_pubkey_compressed = not_supported_recover,
-    .secp_verify_compact = not_supported_verify,
+    .secp_pubkey_create_compressed = secp_pubkey_create_compressed_impl,
+    .secp_sign_recoverable_compact = secp_sign_recoverable_compact_impl,
+    .secp_recover_pubkey_compressed = secp_recover_pubkey_compressed_impl,
+    .secp_verify_compact = secp_verify_compact_impl,
 };
 
 void mona_backend_minimal_init(void)
@@ -239,5 +419,5 @@ void mona_backend_minimal_init(void)
 
 bool mona_backend_minimal_has_full_crypto(void)
 {
-    return false;
+    return true;
 }

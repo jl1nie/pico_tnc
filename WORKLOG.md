@@ -5,6 +5,35 @@ This file tracks implementation work, validation, and remaining risks.
 ## 2026-04-18
 
 ### Summary
+Integrated vendored `secp256k1` into firmware build wiring and replaced minimal crypto stubs with real RIPEMD-160 + secp256k1 operations so `privkey show` can derive/print actual addresses.
+
+### Files changed
+- `pico_tnc/CMakeLists.txt`
+- `pico_tnc/mona_backend_minimal.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- Firmware build now includes vendored `secp256k1` as a subdirectory target and links `secp256k1` into `pico_tnc`.
+- `mona_backend_minimal` now provides:
+  - RIPEMD-160 implementation (for HASH160 address generation).
+  - secp256k1 compressed pubkey creation.
+  - compact sign/recover/verify plumbing via `secp256k1` API.
+- `mona_backend_minimal_has_full_crypto()` now reports `true`, so `privkey show` address derivation path can run with real backend primitives.
+
+### Validation status
+- Syntax-checked backend translation unit with secp headers:
+  - `gcc -std=c11 -fsyntax-only -I./pico_tnc -I./pico_tnc/secp256k1/include pico_tnc/mona_backend_minimal.c`
+- Firmware CMake configure attempted:
+  - `cmake -S . -B build` fails in this environment because `PICO_SDK_PATH` is not configured.
+  - `PICO_SDK_FETCH_FROM_GIT=ON cmake -S . -B build` fails due outbound network restriction (`CONNECT tunnel failed, response 403`) while cloning pico-sdk.
+
+### Remaining risks / TODO
+- Full firmware compile/link validation is still pending in an environment with local pico-sdk access.
+- secp256k1 integration increases flash/RAM footprint; measure map/size deltas on target build environment before release.
+
+## 2026-04-18
+
+### Summary
 Implemented Monacoin address derivation in `privkey show` so the address section now attempts real `p2pkh (M)`, `p2sh (P)`, and `p2wpkh (mona1)` calculation from the persisted private key instead of fixed placeholder text.
 
 ### Files changed
