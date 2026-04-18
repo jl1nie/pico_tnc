@@ -83,6 +83,10 @@ typedef enum {
 static cmd_pending_state_t cmd_pending_state = CMD_PENDING_IDLE;
 static tty_t *cmd_pending_ttyp = NULL;
 
+static mona_addr_type_t mona_param_to_addr_type(uint8_t t);
+static uint8_t mona_addr_type_to_param(mona_addr_type_t t);
+static char const *mona_param_type_name(uint8_t t);
+
 typedef struct {
     tty_t *ttyp;
     uint8_t state[32];
@@ -221,7 +225,7 @@ static bool privkey_gen_start(tty_t *ttyp, mona_addr_type_t type)
     uint8_t init_buf[32];
     uint64_t now_us = time_us_64();
     uint32_t tick = tnc_time();
-    uint32_t rnd = get_rand_32();
+    uint32_t rnd = (uint32_t)now_us;
 
     privkey_gen_reset();
     privkey_gen_ctx.ttyp = ttyp;
