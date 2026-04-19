@@ -20,8 +20,6 @@ This TNC has same functionality as WB8WGA's PIC TNC.
 - On-air self-contained electronic QSL system
 - Built-in MonaCoin-compatible digital signature algorithm (Elliptic Curve Cryptography 256-bit)
 
-- Support multi-port up to 3 ports
-
 ## Help command
 
 - `help` : English help
