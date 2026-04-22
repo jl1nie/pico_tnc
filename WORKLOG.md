@@ -763,3 +763,70 @@ Fixed build break in `cmd_consume_pending_input()` by restoring the missing conv
 
 ### Remaining risks / TODO
 - `CONVERSE_PORT` is now defined in both `tty.c` and `cmd.c`; consider centralizing this constant in a shared header in a later cleanup change.
+
+## 2026-04-22
+
+### Request
+Fix `cmd: ` prompt desynchronization by centralizing prompt output and removing direct prompt prints from command/pending handlers in `cmd.c`.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `pico_tnc/cmd.h`
+- `pico_tnc/tty.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- Added a single prompt helper `cmd_emit_prompt_if_idle()` in `cmd.c`.
+  - Helper emits `cmd: ` only when the console is truly idle:
+    - not in converse mode
+    - not in calibrate mode
+    - no pending command input state
+- Replaced direct prompt writes in these paths to use the helper:
+  - `privkey_gen_abort()`
+  - `sign_qsl_wizard_consume_char()` abort path
+  - `CMD_PENDING_PRIVKEY_SHOW_CONFIRM` completion/abort handling
+  - `CMD_PENDING_SIGN_TX_CONFIRM` confirm/abort handling
+  - calibrate mode exit path
+- Updated `tty.c` CR/CTRL-C prompt emission to call the same helper, preventing prompt insertion while pending handlers are active.
+- No command semantics were changed; this update only centralizes/synchronizes prompt rendering.
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- Prompt logic is now centralized, but startup greeting still contains a static `cmd: ` suffix in `main.c` by design.
+- USB/TTY output queue sizes were not changed; this prompt refactor reduces redundant prompt writes but does not alter queue capacity.
+
+## 2026-04-22
+
+### Request
+Add `sign` readiness check mode (no args), move SIGN prerequisite checks to wizard start, and compact the QSL wizard pre-input guidance.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- Added shared SIGN prerequisite checker (`sign_check_prerequisites`) that centralizes:
+  - required setting checks (`MYCALL`, `UNPROTO`, private key)
+  - user-facing prerequisite error messages
+  - readiness return (`bool`)
+- `sign` with no arguments now shows status summary:
+  - `MYCALL`
+  - `UNPROTO`
+  - `ADDRESS` (active-type address when private key is present)
+  - prints `Ready to go.` only when prerequisites are satisfied.
+- `sign qsl` wizard now checks SIGN prerequisites immediately at start.
+  - If missing, it prints prerequisite messages and does not enter wizard input mode.
+- QSL wizard intro text is compacted to:
+  - `Required: TO, RS, DATE, TIME`
+  - `Optional: FREQ, MODE, QTH`
+  - followed by `Please input the data.` and direct prompt.
+- Input prompts were normalized to concise labels (`TO:`, `RS:`, `QTH:`).
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- `SIGN` no-arg status now derives/display active address text; if address derivation fails it reports `(calculation failed)`.
+- USB/TTY output queue sizes were not changed; message volume changed slightly (status lines added for `SIGN` no-arg).

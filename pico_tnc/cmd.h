@@ -39,3 +39,4 @@ void cmd(tty_t *ttyp, uint8_t *buf, int len);
 void calibrate(void);
 bool cmd_has_pending_input(void);
 bool cmd_consume_pending_input(tty_t *ttyp, int ch);
+void cmd_emit_prompt_if_idle(tty_t *ttyp);

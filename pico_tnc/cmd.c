@@ -89,9 +89,25 @@ typedef enum {
 static cmd_pending_state_t cmd_pending_state = CMD_PENDING_IDLE;
 static tty_t *cmd_pending_ttyp = NULL;
 
+static bool cmd_console_is_idle(tty_t *ttyp)
+{
+    if (!ttyp) return false;
+    if (converse_mode || calibrate_mode) return false;
+    if (cmd_pending_state != CMD_PENDING_IDLE) return false;
+    if (cmd_pending_ttyp != NULL) return false;
+    return true;
+}
+
+void cmd_emit_prompt_if_idle(tty_t *ttyp)
+{
+    if (!cmd_console_is_idle(ttyp)) return;
+    tty_write_str(ttyp, "cmd: ");
+}
+
 static mona_addr_type_t mona_param_to_addr_type(uint8_t t);
 static uint8_t mona_addr_type_to_param(mona_addr_type_t t);
 static char const *mona_param_type_name(uint8_t t);
+static bool sign_check_prerequisites(tty_t *ttyp, bool print_status, bool print_messages);
 
 typedef struct {
     tty_t *ttyp;
@@ -270,7 +286,7 @@ static void privkey_gen_abort(tty_t *ttyp)
     cmd_pending_ttyp = NULL;
     privkey_gen_reset();
     tty_write_str(ttyp, "\r\nAborted by user.\r\n");
-    tty_write_str(ttyp, "cmd: ");
+    cmd_emit_prompt_if_idle(ttyp);
 }
 
 static bool privkey_gen_start(tty_t *ttyp, mona_addr_type_t type)
@@ -898,7 +914,8 @@ void calibrate(void)
     tp->send_state = SP_IDLE;
     tp->do_nrzi = true;
     calibrate_mode = false;
-    tty_write_str(tp->ttyp, "Exit Calibrate Mode\r\ncmd: ");
+    tty_write_str(tp->ttyp, "Exit Calibrate Mode\r\n");
+    cmd_emit_prompt_if_idle(tp->ttyp);
 }
 
 static bool cmd_converse(tty_t *ttyp, uint8_t *buf, int len)
@@ -1204,15 +1221,7 @@ static bool sign_prepare_and_prompt_tx(tty_t *ttyp, const char *json_msg)
     int payload_len;
     char s[80];
     int frame_len;
-
-    if (!param.mona_privkey_valid) {
-        tty_write_str(ttyp, "No private key. Run \"privkey gen\" or \"privkey set\" first.\r\n");
-        return true;
-    }
-    if (!param.mycall.call[0] || !param.unproto[0].call[0]) {
-        tty_write_str(ttyp, "Please set MYCALL and UNPROTO before SIGN.\r\n");
-        return true;
-    }
+    if (!sign_check_prerequisites(ttyp, false, true)) return true;
 
     mona_backend_minimal_init();
 
@@ -1260,6 +1269,64 @@ static bool sign_prepare_and_prompt_tx(tty_t *ttyp, const char *json_msg)
     cmd_pending_state = CMD_PENDING_SIGN_TX_CONFIRM;
     cmd_pending_ttyp = ttyp;
     return true;
+}
+
+static const char *sign_active_address(const mona_address_info_t *addrs)
+{
+    mona_addr_type_t type = mona_param_to_addr_type(param.mona_active_type);
+    if (type == MONA_ADDR_P2SH) return addrs->addr_P;
+    if (type == MONA_ADDR_P2WPKH) return addrs->addr_mona1;
+    return addrs->addr_M;
+}
+
+static bool sign_check_prerequisites(tty_t *ttyp, bool print_status, bool print_messages)
+{
+    bool has_privkey = param.mona_privkey_valid ? true : false;
+    bool has_route = (param.mycall.call[0] && param.unproto[0].call[0]) ? true : false;
+    bool ready = has_privkey && has_route;
+
+    if (print_status) {
+        mona_address_info_t addrs;
+        mona_err_t err = MONA_ERR_INVALID_ARG;
+        const char *addr_text = "(not set)";
+
+        tty_write_str(ttyp, "MYCALL  : ");
+        if (param.mycall.call[0]) tty_write_str(ttyp, param.mycall.call);
+        else tty_write_str(ttyp, "(not set)");
+        tty_write_str(ttyp, "\r\n");
+
+        tty_write_str(ttyp, "UNPROTO : ");
+        if (param.unproto[0].call[0]) {
+            uint8_t path[80];
+            ax25_sendVia(path, param.unproto, (uint8_t)strlen((char *)param.unproto), false);
+            tty_write_str(ttyp, path);
+        } else {
+            tty_write_str(ttyp, "(not set)");
+        }
+        tty_write_str(ttyp, "\r\n");
+
+        tty_write_str(ttyp, "ADDRESS : ");
+        if (has_privkey) {
+            memset(&addrs, 0, sizeof(addrs));
+            mona_backend_minimal_init();
+            err = mona_keypair_from_secret(param.mona_privkey, &addrs);
+            if (err == MONA_OK) addr_text = sign_active_address(&addrs);
+            else addr_text = "(calculation failed)";
+        }
+        tty_write_str(ttyp, addr_text);
+        tty_write_str(ttyp, "\r\n");
+    }
+
+    if (print_messages && !ready) {
+        if (!has_route) {
+            tty_write_str(ttyp, "Please set MYCALL and UNPROTO before SIGN.\r\n");
+        }
+        if (!has_privkey) {
+            tty_write_str(ttyp, "No private key. Run \"privkey gen\" or \"privkey set\" first.\r\n");
+        }
+    }
+
+    return ready;
 }
 
 static bool soft_clock_is_leap(int year)
@@ -1605,8 +1672,8 @@ static void sign_qsl_wizard_prompt(tty_t *ttyp)
     char time[16];
 
     switch (sign_qsl_wizard_ctx.step) {
-        case 0: tty_write_str(ttyp, "TO  : "); break;
-        case 1: tty_write_str(ttyp, "RS  : "); break;
+        case 0: tty_write_str(ttyp, "TO: "); break;
+        case 1: tty_write_str(ttyp, "RS: "); break;
         case 2:
             if (soft_clock_get_preset(date, time)) {
                 tty_write_str(ttyp, "DATE[");
@@ -1627,26 +1694,21 @@ static void sign_qsl_wizard_prompt(tty_t *ttyp)
             break;
         case 4: tty_write_str(ttyp, "FREQ: "); break;
         case 5: tty_write_str(ttyp, "MODE: "); break;
-        case 6: tty_write_str(ttyp, "QTH : "); break;
+        case 6: tty_write_str(ttyp, "QTH: "); break;
         default: break;
     }
 }
 
 static bool sign_qsl_wizard_start(tty_t *ttyp)
 {
+    if (!sign_check_prerequisites(ttyp, false, true)) return true;
+
     memset(&sign_qsl_wizard_ctx, 0, sizeof(sign_qsl_wizard_ctx));
     sign_qsl_wizard_ctx.ttyp = ttyp;
 
+    tty_write_str(ttyp, "Required: TO, RS, DATE, TIME\r\n");
+    tty_write_str(ttyp, "Optional: FREQ, MODE, QTH\r\n");
     tty_write_str(ttyp, "Please input the data.\r\n");
-    tty_write_str(ttyp, "Required\r\n");
-    tty_write_str(ttyp, "TO  :\r\n");
-    tty_write_str(ttyp, "RS  :\r\n");
-    tty_write_str(ttyp, "DATE:\r\n");
-    tty_write_str(ttyp, "TIME:\r\n");
-    tty_write_str(ttyp, "Optional\r\n");
-    tty_write_str(ttyp, "FREQ:\r\n");
-    tty_write_str(ttyp, "MODE:\r\n");
-    tty_write_str(ttyp, "QTH :\r\n");
     sign_qsl_wizard_prompt(ttyp);
     cmd_pending_state = CMD_PENDING_SIGN_QSL_WIZARD;
     cmd_pending_ttyp = ttyp;
@@ -1690,7 +1752,7 @@ static bool sign_qsl_wizard_consume_char(tty_t *ttyp, int ch)
         cmd_pending_ttyp = NULL;
         memset(&sign_qsl_wizard_ctx, 0, sizeof(sign_qsl_wizard_ctx));
         tty_write_str(ttyp, "\r\nAborted by user.\r\n");
-        tty_write_str(ttyp, "cmd: ");
+        cmd_emit_prompt_if_idle(ttyp);
         return true;
     }
     if (ch == '\n') return true;
@@ -1756,8 +1818,9 @@ static bool cmd_sign(tty_t *ttyp, uint8_t *buf, int len)
     (void)len;
 
     if (!buf || !buf[0]) {
-        tty_write_str(ttyp, "SIGN msg <text>\r\n");
-        tty_write_str(ttyp, "SIGN qsl [to] -rs <report> -date <YYYY MM DD|YYYY-MM-DD|YYYYMMDD> -time <HH:MM|HHMM|HHMMTZ> [-freq <f>] [-mode <m>] [-qth <text>]\r\n");
+        if (sign_check_prerequisites(ttyp, true, true)) {
+            tty_write_str(ttyp, "Ready to go.\r\n");
+        }
         return true;
     }
 
@@ -1934,7 +1997,7 @@ bool cmd_consume_pending_input(tty_t *ttyp, int ch)
             tty_write_str(ttyp, "This key is your unique digital identity.\r\n");
             tty_write_str(ttyp, "It can NEVER be recreated.\r\n");
             tty_write_str(ttyp, "Please copy the key string immediately and store it in a secure location.\r\n");
-            tty_write_str(ttyp, "cmd: ");
+            cmd_emit_prompt_if_idle(ttyp);
             return true;
         }
 
@@ -1955,7 +2018,7 @@ bool cmd_consume_pending_input(tty_t *ttyp, int ch)
 
         cmd_pending_state = CMD_PENDING_IDLE;
         cmd_pending_ttyp = NULL;
-        tty_write_str(ttyp, "cmd: ");
+        cmd_emit_prompt_if_idle(ttyp);
         return true;
     }
 
@@ -1974,7 +2037,7 @@ bool cmd_consume_pending_input(tty_t *ttyp, int ch)
             cmd_pending_ttyp = NULL;
             memset(&sign_tx_ctx, 0, sizeof(sign_tx_ctx));
             tty_write_str(ttyp, "Aborted by user.\r\n");
-            tty_write_str(ttyp, "cmd: ");
+            cmd_emit_prompt_if_idle(ttyp);
             return true;
         }
         if (ch != '\r') return true;
@@ -1983,7 +2046,7 @@ bool cmd_consume_pending_input(tty_t *ttyp, int ch)
         cmd_pending_state = CMD_PENDING_IDLE;
         cmd_pending_ttyp = NULL;
         memset(&sign_tx_ctx, 0, sizeof(sign_tx_ctx));
-        tty_write_str(ttyp, "cmd: ");
+        cmd_emit_prompt_if_idle(ttyp);
         return true;
     }
 
