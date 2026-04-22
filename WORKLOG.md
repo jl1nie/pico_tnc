@@ -5,6 +5,34 @@ This file tracks implementation work, validation, and remaining risks.
 ## 2026-04-22
 
 ### Summary
+Fixed `tty_history_prev()` so the first `↑` from the initial unselected state (`history_nav_index == cmd_history_head`) always moves to the latest history entry.
+
+### Files changed
+- `pico_tnc/tty.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- History-up navigation now validates the *destination index* instead of blocking based on the current index being oldest.
+- Maintained expected behavior:
+  - With 0 history entries, `↑` rings bell only.
+  - After reaching oldest entry, additional `↑` rings bell only.
+  - `↓` still navigates newer entries, and when reaching `head` it restores the saved in-progress edit line.
+- RAM/queue impact note: no buffer sizes or queue constants changed; only navigation boundary logic was adjusted.
+
+### Validation status
+- Build attempted with:
+  - `cmake -S . -B build`
+  - `cmake --build build -j4`
+- In this environment, firmware build cannot complete because Pico SDK path is not configured (`PICO_SDK_PATH` missing).
+- Regression test viewpoints recorded for history ring behavior:
+  - 7 entries (`count=7`): confirm first `↑` from `head` reaches latest, repeated `↑` stops with bell at oldest, `↓` returns and restores saved edit at `head`.
+  - 8 entries (`count=8`, full ring): same checks across wrap boundary.
+  - 9 entries (overwrite starts): confirm oldest is dropped, newest is reachable on first `↑`, and oldest boundary/bell behavior remains correct.
+
+### Remaining risks / TODO
+- Runtime verification on actual terminal clients (USB/UART) is still pending due build environment limitation.
+
+### Summary
 Added a `termtest` command for raw terminal byte inspection mode.
 
 ### Files changed
