@@ -195,7 +195,7 @@ void tty_input(tty_t *ttyp, int ch)
                     cmd(ttyp, ttyp->cmd_buf, ttyp->cmd_idx);
                 }
             }
-            if (!(converse_mode | calibrate_mode)) tty_write_str(ttyp, "cmd: ");
+            cmd_emit_prompt_if_idle(ttyp);
             ttyp->cmd_idx = 0;
             break;
 
@@ -203,7 +203,8 @@ void tty_input(tty_t *ttyp, int ch)
             if (converse_mode) {
                 converse_mode = false;
             }
-            tty_write_str(ttyp, "\r\ncmd: ");
+            tty_write_str(ttyp, "\r\n");
+            cmd_emit_prompt_if_idle(ttyp);
             ttyp->cmd_idx = 0;
             break;
 
