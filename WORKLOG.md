@@ -5,6 +5,69 @@ This file tracks implementation work, validation, and remaining risks.
 ## 2026-04-22
 
 ### Summary
+Updated `sign qsl` wizard completion behavior to auto-register an equivalent one-line `sign qsl ...` command into CLI history.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `pico_tnc/tty.c`
+- `pico_tnc/tty.h`
+- `WORKLOG.md`
+
+### Behavior changes
+- Added public history push API `tty_history_push()` so command-layer flows can register synthetic history entries.
+- In `sign qsl` wizard mode, after all fields are entered, firmware now builds a replayable one-line command:
+  - `sign qsl <TO> -rs <RS> -date <DATE> -time <TIME> [-freq <FREQ>] [-mode <MODE>] [-qth <QTH>]`
+- The generated replay line is pushed to command history before entering the existing sign/tx confirmation flow.
+- DATE/TIME in the replay line are normalized when possible (`YYYYMMDD`, `HHMMTZ`); if normalization fails, original wizard text is retained.
+- Queue/RAM impact note: change reuses existing history storage and adds one temporary formatting buffer on stack in wizard consume path; queue constants are unchanged.
+
+### Validation status
+- Build attempted with:
+  - `cmake -S . -B build`
+  - `cmake --build build -j4`
+- In this environment, full firmware build cannot complete due missing Pico SDK configuration (`PICO_SDK_PATH` not set).
+
+### Remaining risks / TODO
+- Replay command builder currently appends options without shell-style quoting; fields containing special characters are still stored literally as typed.
+
+### Summary
+Added command history and in-line command editing for terminal input, including ANSI cursor/history keys and Ctrl-key fallbacks for non-ANSI terminals.
+
+### Files changed
+- `pico_tnc/tnc.h`
+- `pico_tnc/tty.c`
+- `README.md`
+- `README_JP.md`
+- `WORKLOG.md`
+
+### Behavior changes
+- Increased CLI input line buffer from 255 bytes to 1024 bytes (`CMD_BUF_LEN=1024`).
+- Added command history ring buffer: 8 entries × 1024 bytes.
+- If input exceeds 1024 bytes, additional tail bytes are ignored (truncated).
+- Added ANSI escape sequence handling in command-wait state:
+  - `↑/↓`: previous/next history
+  - `←/→`: move cursor left/right
+  - `Home/End`: move to line start/end
+  - `Delete`: delete character at cursor
+- Added equivalent Ctrl-key operations for non-ANSI terminals:
+  - `Ctrl+P/Ctrl+N` history prev/next
+  - `Ctrl+B/Ctrl+F` cursor left/right
+  - `Ctrl+A/Ctrl+E` line start/end
+  - `Ctrl+H` backspace
+- Added in-line insertion/deletion support (editing in the middle of a command line) with prompt-line redraw.
+- RAM/queue impact note: this change adds fixed RAM for history storage (~8KB + small nav state), and redraw output increases transient terminal output volume during cursor editing; no queue size constants were changed.
+
+### Validation status
+- Build attempted with:
+  - `cmake -S . -B build`
+  - `cmake --build build -j4`
+- In this environment, full firmware build cannot complete due missing Pico SDK configuration (`PICO_SDK_PATH` not set).
+
+### Remaining risks / TODO
+- ANSI escape handling targets common VT-style sequences (`CSI`/`SS3` variants for arrows/home/end and `3~` for delete); behavior on uncommon terminal emulators should be confirmed on actual operation setups.
+- Current CLI redraw assumes prompt text `cmd: ` for line refresh and is intended for idle command input mode.
+
+### Summary
 Added a guarded CLI command `system usb_bootloader` that requires a strict `Y` → `E` → `S` → `Enter` key sequence within 10 seconds before rebooting into USB BOOTSEL mode.
 
 ### Files changed

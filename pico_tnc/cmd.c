@@ -1549,6 +1549,54 @@ static bool qsl_build_json(const qsl_data_t *data, char *json_out, size_t json_o
     return true;
 }
 
+static void qsl_append_arg(char *dst, size_t dst_sz, char const *flag, char const *value)
+{
+    size_t need;
+
+    if (!value || !value[0]) return;
+
+    need = strlen(dst) + strlen(flag) + strlen(value) + 2;
+    if (need >= dst_sz) return;
+
+    strncat(dst, " ", dst_sz - strlen(dst) - 1);
+    strncat(dst, flag, dst_sz - strlen(dst) - 1);
+    strncat(dst, " ", dst_sz - strlen(dst) - 1);
+    strncat(dst, value, dst_sz - strlen(dst) - 1);
+}
+
+static void qsl_make_replay_command(char out[CMD_BUF_LEN + 1], qsl_data_t const *data)
+{
+    char norm_date[16];
+    char norm_time[16];
+    char date_buf[sizeof(data->date)];
+    char time_buf[sizeof(data->time)];
+
+    date_buf[0] = '\0';
+    time_buf[0] = '\0';
+
+    if (qsl_validate_and_normalize_date(data->date, norm_date)) {
+        strncpy(date_buf, norm_date, sizeof(date_buf) - 1);
+    } else {
+        strncpy(date_buf, data->date, sizeof(date_buf) - 1);
+    }
+    date_buf[sizeof(date_buf) - 1] = '\0';
+
+    if (qsl_validate_and_normalize_time(data->time, norm_time)) {
+        strncpy(time_buf, norm_time, sizeof(time_buf) - 1);
+    } else {
+        strncpy(time_buf, data->time, sizeof(time_buf) - 1);
+    }
+    time_buf[sizeof(time_buf) - 1] = '\0';
+
+    snprintf(out, CMD_BUF_LEN + 1, "sign qsl %s", data->qsl);
+    qsl_append_arg(out, CMD_BUF_LEN + 1, "-rs", data->rs);
+    qsl_append_arg(out, CMD_BUF_LEN + 1, "-date", date_buf);
+    qsl_append_arg(out, CMD_BUF_LEN + 1, "-time", time_buf);
+    qsl_append_arg(out, CMD_BUF_LEN + 1, "-freq", data->freq);
+    qsl_append_arg(out, CMD_BUF_LEN + 1, "-mode", data->mode);
+    qsl_append_arg(out, CMD_BUF_LEN + 1, "-qth", data->qth);
+}
+
 static bool qsl_try_update_soft_clock(const qsl_data_t *data)
 {
     int year, month, day;
@@ -1766,6 +1814,7 @@ static bool sign_qsl_wizard_consume_char(tty_t *ttyp, int ch)
 {
     char date[16];
     char time[16];
+    char replay_cmd[CMD_BUF_LEN + 1];
 
     if (ttyp != sign_qsl_wizard_ctx.ttyp) return false;
     if (ch == '\x1b') {
@@ -1819,9 +1868,11 @@ static bool sign_qsl_wizard_consume_char(tty_t *ttyp, int ch)
 
     if (sign_qsl_wizard_ctx.step > 6) {
         qsl_data_t data = sign_qsl_wizard_ctx.data;
+        qsl_make_replay_command(replay_cmd, &data);
         cmd_pending_state = CMD_PENDING_IDLE;
         cmd_pending_ttyp = NULL;
         memset(&sign_qsl_wizard_ctx, 0, sizeof(sign_qsl_wizard_ctx));
+        tty_history_push((uint8_t const *)replay_cmd, (int)strlen(replay_cmd));
         return qsl_finalize_and_sign(ttyp, &data);
     }
 
