@@ -37,6 +37,21 @@ This TNC has same functionality as WB8WGA's PIC TNC.
 - `sign qsl ...` : sign QSL JSON payload (`QSL/S/D/T/F/M/P`) and prepare AX.25 UI-frame TX; supports argument form and no-arg wizard form
 - `system usb_bootloader` : guarded reboot to USB BOOTSEL mode (requires `Y`, `E`, `S`, `Enter` in order within 10 seconds)
 
+## Command-line editing and history
+
+- Input line buffer: `1024` bytes (extra input beyond 1024 bytes is truncated at the tail).
+- History buffer: `8` entries × `1024` bytes.
+- ANSI escape sequence keys:
+  - `↑ / ↓`: history previous/next
+  - `← / →`: move cursor left/right
+  - `Home / End`: move to line start/end
+  - `Backspace / Delete`: edit inside the line
+- Fallback control keys for non-ANSI terminals:
+  - `Ctrl+P / Ctrl+N`: history previous/next
+  - `Ctrl+B / Ctrl+F`: cursor left/right
+  - `Ctrl+A / Ctrl+E`: line start/end
+  - `Ctrl+H`: backspace
+
 ## How to build
 
 ```

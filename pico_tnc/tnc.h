@@ -49,7 +49,7 @@
 
 #define KISS_PACKET_LEN 1024                // kiss packet length
 #define TTY_N 3                             // number of serial
-#define CMD_BUF_LEN 255
+#define CMD_BUF_LEN 1024
 
 
 enum STATE {
@@ -240,6 +240,10 @@ typedef struct TTY {
     uint8_t cmd_buf[CMD_BUF_LEN + 1];
     int kiss_idx;
     int cmd_idx;
+    int cmd_cursor;
+    uint8_t esc_state;
+    uint8_t esc_prefix;
+    uint8_t esc_param;
 
     uint8_t num;        // index of tty[]
 
