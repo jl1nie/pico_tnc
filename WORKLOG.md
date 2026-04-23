@@ -1201,3 +1201,57 @@ Separate responsibilities between `tty_set_cmdline()` and `tty_refresh_cmdline()
 ### Remaining risks / TODOs
 - USB/TTY output queue sizes were not changed.
 - Redraw still relies on ANSI `ESC[K` for end-of-line clearing support.
+
+## 2026-04-23
+
+### Request
+Adjust `privkey gen` completion UX to show derived addresses, add Space-key respin, and fix the post-accept message to clarify that Flash save is not done until `perm`.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `README.md`
+- `README_JP.md`
+- `WORKLOG.md`
+
+### Behavior changes
+- `privkey gen` completion now prints the generated address set (`p2pkh`, `p2sh`, `p2wpkh`) immediately after `Private key generation complete.`.
+- Added completion prompt controls:
+  - `Space`: respin pending secret
+  - `Enter`: accept pending secret into runtime settings
+  - `ESC`: abort
+- Respin behavior now mutates pending raw key material by adding current tick-derived value, then re-hashes and validates secp256k1 range before updating pending secret.
+- Replaced misleading completion text (`Save complete.`) after accept with guidance that key is not yet saved to Flash and user must run `perm`.
+- Updated command descriptions in both English/Japanese READMEs to reflect respin/accept/save flow.
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- USB/TTY queue sizes were not changed.
+- Completion output now includes additional lines (address block + respin prompt), which increases output volume per generation completion but does not alter queue allocation sizes.
+
+## 2026-04-23
+
+### Request
+Restore the `CRITICAL NOTICE` block in `privkey gen` accept output while keeping the new unsaved/`perm` guidance and explicit blank-line layout.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- `privkey gen` accept path now prints:
+  - `The private key has not yet been saved.`
+  - blank line
+  - `CRITICAL NOTICE` 4-line warning block
+  - blank line
+  - `Run "perm" ...` and `Run the "privkey show" ...`
+  - trailing blank line
+- No changes to key generation, respin algorithm, or pending-state transitions.
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- USB/TTY queue sizes were not changed.
+- Output length in accept path remains longer than pre-change due to warning and guidance lines.

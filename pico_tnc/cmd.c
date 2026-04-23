@@ -385,6 +385,59 @@ static bool privkey_gen_save_pending_secret(void)
     return true;
 }
 
+static bool privkey_gen_respin_pending_secret(void)
+{
+    const mona_crypto_vtable_t *crypto = mona_get_crypto();
+    uint8_t seed[36];
+    uint8_t next_secret[32];
+    uint32_t tick;
+    int i;
+
+    if (!privkey_gen_ctx.has_pending_secret) return false;
+    if (!crypto || !crypto->sha256) return false;
+
+    memcpy(seed, privkey_gen_ctx.pending_secret, 32);
+    tick = tnc_time();
+
+    for (i = 31; i >= 0; --i) {
+        uint16_t sum = (uint16_t)seed[i] + (uint16_t)(tick & 0xff);
+        seed[i] = (uint8_t)(sum & 0xff);
+        tick = (tick >> 8) + (sum >> 8);
+    }
+    memcpy(seed + 32, &tick, sizeof(tick));
+
+    for (i = 0; i < 1024; ++i) {
+        if (!crypto->sha256(seed, sizeof(seed), next_secret)) return false;
+        if (secp256k1_secret_is_valid(next_secret)) {
+            memcpy(privkey_gen_ctx.pending_secret, next_secret, 32);
+            return true;
+        }
+        memcpy(seed, next_secret, 32);
+        memcpy(seed + 32, &i, sizeof(i));
+    }
+    return false;
+}
+
+static void privkey_gen_print_pending_addresses(tty_t *ttyp)
+{
+    mona_address_info_t addrs;
+    mona_err_t err;
+
+    memset(&addrs, 0, sizeof(addrs));
+    err = mona_keypair_from_secret(privkey_gen_ctx.pending_secret, &addrs);
+
+    tty_write_str(ttyp, "\r\n");
+    tty_write_str(ttyp, "p2pkh (M)     : ");
+    tty_write_str(ttyp, (err == MONA_OK) ? addrs.addr_M : "(calculation failed)");
+    tty_write_str(ttyp, "\r\n");
+    tty_write_str(ttyp, "p2sh  (P)     : ");
+    tty_write_str(ttyp, (err == MONA_OK) ? addrs.addr_P : "(calculation failed)");
+    tty_write_str(ttyp, "\r\n");
+    tty_write_str(ttyp, "p2wpkh(mona1) : ");
+    tty_write_str(ttyp, (err == MONA_OK) ? addrs.addr_mona1 : "(calculation failed)");
+    tty_write_str(ttyp, "\r\n");
+}
+
 static void privkey_gen_abort(tty_t *ttyp)
 {
     cmd_pending_state = CMD_PENDING_IDLE;
@@ -482,7 +535,8 @@ static bool privkey_gen_consume_char(tty_t *ttyp, int ch)
         }
         cmd_pending_state = CMD_PENDING_PRIVKEY_SHOW_CONFIRM;
         tty_write_str(ttyp, "Private key generation complete.\r\n");
-        tty_write_str(ttyp, "Press [Enter] to save or [ESC] to abort.\r\n");
+        privkey_gen_print_pending_addresses(ttyp);
+        tty_write_str(ttyp, "\r\nPress [Space] to Respin , [Enter] to Accept , [ESC] to Abort.\r\n");
     }
     return true;
 }
@@ -2183,6 +2237,15 @@ bool cmd_consume_pending_input(tty_t *ttyp, int ch)
     if (cmd_pending_state == CMD_PENDING_PRIVKEY_SHOW_CONFIRM) {
         if (privkey_gen_ctx.has_pending_secret && privkey_gen_ctx.ttyp == ttyp) {
             if (ch == '\n') return true;
+            if (ch == ' ') {
+                if (!privkey_gen_respin_pending_secret()) {
+                    privkey_gen_abort(ttyp);
+                    return true;
+                }
+                privkey_gen_print_pending_addresses(ttyp);
+                tty_write_str(ttyp, "\r\nPress [Space] to Respin , [Enter] to Accept , [ESC] to Abort.\r\n");
+                return true;
+            }
             if (ch == '\x1b') {
                 privkey_gen_abort(ttyp);
                 return true;
@@ -2198,13 +2261,16 @@ bool cmd_consume_pending_input(tty_t *ttyp, int ch)
             cmd_pending_ttyp = NULL;
             privkey_gen_reset();
 
-            tty_write_str(ttyp, "Save complete.\r\n");
-            tty_write_str(ttyp, "Run the \"privkey show\" command to verify your new private key.\r\n");
+            tty_write_str(ttyp, "The private key has not yet been saved.\r\n");
             tty_write_str(ttyp, "\r\n");
             tty_write_str(ttyp, "CRITICAL NOTICE:\r\n");
             tty_write_str(ttyp, "This key is your unique digital identity.\r\n");
             tty_write_str(ttyp, "It can NEVER be recreated.\r\n");
             tty_write_str(ttyp, "Please copy the key string immediately and store it in a secure location.\r\n");
+            tty_write_str(ttyp, "\r\n");
+            tty_write_str(ttyp, "Run \"perm\" to save it to the Flash ROM.\r\n");
+            tty_write_str(ttyp, "Run the \"privkey show\" command to verify your new private key.\r\n");
+            tty_write_str(ttyp, "\r\n");
             cmd_emit_prompt_if_idle(ttyp);
             return true;
         }
