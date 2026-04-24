@@ -1255,3 +1255,27 @@ Restore the `CRITICAL NOTICE` block in `privkey gen` accept output while keeping
 ### Remaining risks / TODOs
 - USB/TTY queue sizes were not changed.
 - Output length in accept path remains longer than pre-change due to warning and guidance lines.
+
+## 2026-04-24
+
+### Request
+Change the `sign qsl` payload format from flat `{"QSL":"...","S":...}` to nested `{"QSL":{"C":"...","S":...}}`.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `README.md`
+- `README_JP.md`
+- `WORKLOG.md`
+
+### Behavior changes
+- `sign qsl` JSON construction now emits:
+  - `{"QSL":{"C":"<to>","S":"<rs>","D":"<date>","T":"<time>","F":"<freq>","M":"<mode>","P":"<qth>"}}`
+- Argument parsing, wizard flow, signing flow, and TX confirmation behavior are unchanged.
+- Updated English/Japanese command documentation to reflect the new nested QSL format.
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- USB/TTY queue sizes were not changed.
+- Payload text for `sign qsl` is slightly longer due to the nested object wrapper (`"QSL":{"C":...}`), which may marginally increase output bytes per signed frame without changing any queue allocation.

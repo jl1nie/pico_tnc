@@ -1684,7 +1684,7 @@ static bool qsl_build_json(const qsl_data_t *data, char *json_out, size_t json_o
     if (!json_escape_message((const uint8_t *)data->qth, (int)strlen(data->qth), qth, sizeof(qth))) return false;
 
     if (snprintf(json_out, json_out_sz,
-                 "{\"QSL\":\"%s\",\"S\":\"%s\",\"D\":\"%s\",\"T\":\"%s\",\"F\":\"%s\",\"M\":\"%s\",\"P\":\"%s\"}",
+                 "{\"QSL\":{\"C\":\"%s\",\"S\":\"%s\",\"D\":\"%s\",\"T\":\"%s\",\"F\":\"%s\",\"M\":\"%s\",\"P\":\"%s\"}}",
                  qsl, rs, date, time, freq, mode, qth) >= (int)json_out_sz) {
         return false;
     }
