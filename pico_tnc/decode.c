@@ -28,6 +28,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <ctype.h>
+#include <string.h>
 #include "pico/stdlib.h"
 
 //#include "timer.h"
@@ -38,6 +40,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "tty.h"
 #include "digipeat.h"
 #include "kiss.h"
+#include "mona_backend_minimal.h"
+#include "libmona_pico/mona_compat.h"
 
 #define FCS_OK 0x0f47
 //#define FCS_OK (0x0f47 ^ 0xffff)
@@ -46,6 +50,112 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define STR_LEN 64
 
 static uint8_t str[STR_LEN];
+
+#define SIGNATURE_B64_LEN 88
+
+static int ax25_info_offset(const uint8_t *data, int len)
+{
+    int addr_end = 6;
+
+    if (!data || len < MIN_LEN) return -1;
+    while (addr_end < len && !(data[addr_end] & 0x01)) {
+        addr_end += 7;
+    }
+    if (addr_end >= len) return -1;
+    if (addr_end + 2 >= len) return -1;
+    return addr_end + 3; // Address + Control + PID
+}
+
+static bool json_object_end(const uint8_t *buf, int len, int *json_end)
+{
+    int depth = 0;
+    int i = 0;
+    bool in_string = false;
+    bool esc = false;
+
+    while (i < len && isspace((unsigned char)buf[i])) i++;
+    if (i >= len || buf[i] != '{') return false;
+
+    for (; i < len; ++i) {
+        uint8_t ch = buf[i];
+
+        if (in_string) {
+            if (esc) esc = false;
+            else if (ch == '\\') esc = true;
+            else if (ch == '"') in_string = false;
+            continue;
+        }
+
+        if (ch == '"') {
+            in_string = true;
+            continue;
+        }
+        if (ch == '{') depth++;
+        else if (ch == '}') {
+            depth--;
+            if (depth == 0) {
+                *json_end = i + 1;
+                return true;
+            }
+            if (depth < 0) return false;
+        }
+    }
+    return false;
+}
+
+static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
+{
+    int info_off;
+    int info_len;
+    int json_end;
+    int sig_len;
+    char json_msg[DATA_LEN + 1];
+    char sig_b64[SIGNATURE_B64_LEN + 1];
+    mona_verify_result_t vr;
+    mona_err_t err;
+    uint64_t t0_us;
+    uint64_t t1_us;
+    const char *addr;
+
+    info_off = ax25_info_offset(tp->data, tp->data_cnt);
+    if (info_off < 0 || info_off >= tp->data_cnt - 2) return;
+    info_len = tp->data_cnt - 2 - info_off; // exclude FCS
+    if (info_len <= 0 || !json_object_end(tp->data + info_off, info_len, &json_end)) return;
+
+    sig_len = info_len - json_end;
+    if (sig_len <= 0) return;
+    if (sig_len != SIGNATURE_B64_LEN) {
+        tty_write_str(ttyp, "Signature error: invalid signature length\r\n");
+        return;
+    }
+
+    memcpy(json_msg, tp->data + info_off, json_end);
+    json_msg[json_end] = '\0';
+    memcpy(sig_b64, tp->data + info_off + json_end, sig_len);
+    sig_b64[sig_len] = '\0';
+
+    tty_write_str(ttyp, "Digital signature calculation in progress... ");
+    t0_us = time_us_64();
+    mona_backend_minimal_init();
+    err = mona_verifymessage("", json_msg, sig_b64, &vr);
+    t1_us = time_us_64();
+    snprintf(str, STR_LEN, "Completed. (%lluus)\r\n", (unsigned long long)(t1_us - t0_us));
+    tty_write(ttyp, str, strlen((char *)str));
+
+    if (err != MONA_OK && err != MONA_ERR_ADDRESS_MISMATCH) {
+        tty_write_str(ttyp, "Signature error: ");
+        tty_write_str(ttyp, mona_errstr(err));
+        tty_write_str(ttyp, "\r\n");
+        return;
+    }
+
+    addr = vr.recovered_addr_M;
+    if (vr.txin_type_guess == MONA_TXIN_P2WPKH) addr = vr.recovered_addr_mona1;
+    else if (vr.txin_type_guess == MONA_TXIN_P2WPKH_P2SH) addr = vr.recovered_addr_P;
+    tty_write_str(ttyp, "Signature address:");
+    tty_write_str(ttyp, addr);
+    tty_write_str(ttyp, "\r\n");
+}
 
 static void display_packet(tty_t *ttyp, tnc_t *tp)
 {
@@ -134,11 +244,13 @@ static void output_packet(tnc_t *tp)
             switch (param.mon) {
                 case MON_ALL:
                     display_packet(ttyp, tp);
+                    display_signature_recovery(ttyp, tp);
                     break;
 
                 case MON_ME:
                     if (ax25_callcmp(&param.mycall, &data[0])) { // dst addr check
                         display_packet(ttyp, tp);
+                        display_signature_recovery(ttyp, tp);
                     }
             }
         }
