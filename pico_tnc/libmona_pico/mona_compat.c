@@ -489,7 +489,7 @@ static mona_err_t b64_to_compact_sig(const char *b64, uint8_t *out65) {
     while (pos < len) {
         int a = b64v(b64[pos++]), b = b64v(b64[pos++]);
         int c = b64v(b64[pos++]), d = b64v(b64[pos++]);
-        if (a < 0 || b < 0 || c < -1 || d < -1) return MONA_ERR_FORMAT;
+        if (a < 0 || b < 0 || c < -2 || d < -2) return MONA_ERR_FORMAT;
         uint32_t v = ((uint32_t)a << 18) | ((uint32_t)b << 12) |
                      ((uint32_t)(c < 0 ? 0 : c) << 6) | (uint32_t)(d < 0 ? 0 : d);
         if (o < 65) out65[o++] = (uint8_t)((v >> 16) & 0xFF);

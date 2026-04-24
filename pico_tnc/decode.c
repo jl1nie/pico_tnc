@@ -144,7 +144,7 @@ static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
 
     if (err != MONA_OK && err != MONA_ERR_ADDRESS_MISMATCH) {
         tty_write_str(ttyp, "Signature error: ");
-        tty_write_str(ttyp, mona_errstr(err));
+        tty_write_str(ttyp, mona_strerror(err));
         tty_write_str(ttyp, "\r\n");
         return;
     }
