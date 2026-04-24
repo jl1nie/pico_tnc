@@ -1303,3 +1303,29 @@ Fix `sign qsl` option parsing so `-qth` stops at the next option token (space + 
 ### Remaining risks / TODOs
 - USB/TTY queue sizes were not changed.
 - `-qth` values that intentionally begin with `-` remain unsupported in argument mode because `-...` is treated as the next option token.
+
+## 2026-04-24
+
+### Request
+On packet receive, detect whether the packet information field starts with JSON; keep legacy output for non-JSON, and when JSON has a trailing signature, attempt Monacoin signature-address recovery with progress/time output.
+
+### Files changed
+- `pico_tnc/decode.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- Receive display now performs an additional check on AX.25 information field bytes:
+  - If the info field does not start with a JSON object, output remains unchanged.
+  - If it starts with JSON but has no trailing signature bytes, output remains unchanged.
+  - If trailing bytes exist and are not the expected compact-signature Base64 length (88), an error line is printed.
+- When a JSON payload has an appended 88-byte Base64 signature, the receiver now prints:
+  - `Digital signature calculation in progress... Completed. (<time>us)`
+  - then either `Signature address:<address>` on successful recovery or `Signature error: <reason>` on failure.
+- Address recovery chooses display address type from the signature header guess (`mona1` / `P` / `M`) after recovery.
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- USB/TTY queue sizes were not changed.
+- Added receive-path status/error lines increase text output volume per signed JSON frame, which may increase queue occupancy during burst receive traffic without changing queue allocation.
