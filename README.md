@@ -1,5 +1,13 @@
 # PICO TNC
 
+[日本語版](/README_ja.md)
+
+Daisuke JA1UMW / CQAKIBA.TOKYO Ver.
+
+[Original PICO-TNC](https://github.com/amedes/pico_tnc)
+
+[Introduction](/INTRODUCTION_JP.md)
+
 PICO TNC is the Terminal Node Controler for Amateur Packet Radio powered by Raspberry Pi Pico.
 
 This TNC has same functionality as WB8WGA's PIC TNC.
@@ -64,6 +72,6 @@ cmake ..
 make -j4
 (flash 'pico_tnc/pico_tnc.uf2' file to your Pico)
 ```
-![bell202-wave](bell202-wave.png)
-![command line](command.png)
-[![schemantic](schematic.jpg)](schematic.png)
+![bell202-wave](images/bell202-wave.png)
+![command line](images/command.png)
+[![schemantic](images/schematic.jpg)](schematic.png)
