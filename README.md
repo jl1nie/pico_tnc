@@ -1,6 +1,6 @@
 # PICO TNC
 
-[日本語版](/README_ja.md)
+[日本語版](/README_JP.md)
 
 Daisuke JA1UMW / CQAKIBA.TOKYO Ver.
 
