@@ -14,9 +14,19 @@ static const char *skip_ws(const char *p)
     return p;
 }
 
-static void card_write_line(tty_t *ttyp, const char *text)
+static void card_write_line(tty_t *ttyp, const char *text, const char *lr)
 {
-    int n = snprintf((char *)qsl_line_buf, QSL_CARD_LINE_BUF, "  | %-46.46s |\r\n", text ? text : "");
+    char left = '|';
+    char right = '|';
+
+    if (lr && lr[0] && lr[1]) {
+        left = lr[0];
+        right = lr[1];
+    }
+
+    int n = snprintf((char *)qsl_line_buf, QSL_CARD_LINE_BUF,
+                     "  %c %-46.46s %c\r\n",
+                     left, text ? text : "", right);
     tty_write(ttyp, qsl_line_buf, n);
 }
 
@@ -181,39 +191,39 @@ void qsl_card_render(tty_t *ttyp, const qsl_card_t *card, const char *from, cons
 
     tty_write_str(ttyp, "\r\n");
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
-    card_write_line(ttyp, "Digitally Signed QSL Card");
+    card_write_line(ttyp, "Digitally Signed QSL Card", NULL);
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
     snprintf(line, sizeof(line), "From     : %s", from);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "To Call  : %s", card->to_call);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "Report   : %s", card->report);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "Date     : %s", card->date);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "Time     : %s", card->time);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "Freq     : %s", card->freq);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "Mode     : %s", card->mode);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "QTH      : %s", card->qth);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
-    card_write_line(ttyp, "Extended entries");
+    card_write_line(ttyp, "Extended entries", NULL);
     for (int i = 0; i < card->ext_n; i++) {
-        card_write_line(ttyp, card->ext[i]);
+        card_write_line(ttyp, card->ext[i], NULL);
     }
-    if (card->ext_n == 0) card_write_line(ttyp, "");
+    if (card->ext_n == 0) card_write_line(ttyp, "", NULL);
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
-    card_write_line(ttyp, "Signature");
+    card_write_line(ttyp, "Signature", NULL);
     snprintf(line, sizeof(line), "%.45s", sig_b64);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     snprintf(line, sizeof(line), "%s", sig_b64 + 45);
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
-    card_write_line(ttyp, "Signed ID (Mona address)");
-    card_write_line(ttyp, addr);
+    card_write_line(ttyp, "Signed ID (Mona address)", "><");
+    card_write_line(ttyp, addr, "><");
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
     if (!strcmp(status, "OK")) {
         static const char *suffix = "Confirming Our QSO.";
@@ -224,7 +234,7 @@ void qsl_card_render(tty_t *ttyp, const qsl_card_t *card, const char *from, cons
     } else {
         snprintf(line, sizeof(line), "Status   : %s", status);
     }
-    card_write_line(ttyp, line);
+    card_write_line(ttyp, line, NULL);
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
     tty_write_str(ttyp, "\r\n");
 }
