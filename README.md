@@ -1,4 +1,4 @@
-# PICO TNC
+# PICO TNC D+
 
 [日本語版](/README_JP.md)
 
