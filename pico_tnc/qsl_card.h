@@ -8,6 +8,7 @@
 #define QSL_CARD_EXT_MAX 4
 
 typedef struct {
+    char from_fr[24];
     char to_call[17];
     char report[16];
     char date[24];
@@ -17,10 +18,11 @@ typedef struct {
     char qth[40];
     char ext[QSL_CARD_EXT_MAX][48];
     int ext_n;
+    bool has_fr;
     bool has_qsl;
 } qsl_card_t;
 
 bool qsl_card_parse(const char *json, qsl_card_t *card);
-void qsl_card_render(tty_t *ttyp, const qsl_card_t *card, const char *from, const char *addr, const char *sig_b64, const char *status);
+void qsl_card_render(tty_t *ttyp, const qsl_card_t *card, const char *from, const char *addr, const char *raw_data, const char *sig_b64, const char *status);
 
 #endif

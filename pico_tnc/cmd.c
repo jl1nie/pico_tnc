@@ -168,6 +168,11 @@ typedef struct {
 } qsl_data_t;
 
 typedef struct {
+    char name[64];
+    char bio[128];
+} adv_data_t;
+
+typedef struct {
     bool is_set;
     int year;
     int month;
@@ -1445,7 +1450,7 @@ static bool sign_prepare_and_prompt_tx(tty_t *ttyp, const char *json_msg)
         memset(from_u8, 0, sizeof(from_u8));
         from_u8[callsign2ascii(from_u8, &param.mycall)] = '\0';
         snprintf(from, sizeof(from), "%s", (char *)from_u8);
-        qsl_card_render(ttyp, &card, from, addr_preview, sig_b64, "Preview");
+        qsl_card_render(ttyp, &card, from, addr_preview, json_msg, sig_b64, "Preview");
     }
 
     tty_write_str(ttyp, "Ready to send. Press [Enter] to TX or [ESC] to abort.\r\n");
@@ -1695,10 +1700,35 @@ static void qsl_upper_copy(char *out, size_t out_sz, const char *in)
     out[i] = '\0';
 }
 
+static bool sign_build_escaped_mycall(char *out, size_t out_sz)
+{
+    uint8_t from_u8[16];
+
+    memset(from_u8, 0, sizeof(from_u8));
+    from_u8[callsign2ascii(from_u8, &param.mycall)] = '\0';
+    return json_escape_message(from_u8, (int)strlen((char *)from_u8), out, out_sz);
+}
+
+static bool sign_build_active_address(char *out, size_t out_sz)
+{
+    mona_address_info_t addrs;
+    const char *active_addr;
+
+    if (!param.mona_privkey_valid) return false;
+    mona_backend_minimal_init();
+    memset(&addrs, 0, sizeof(addrs));
+    if (mona_keypair_from_secret(param.mona_privkey, &addrs) != MONA_OK) return false;
+    active_addr = sign_active_address(&addrs);
+    if (!active_addr || !active_addr[0]) return false;
+    snprintf(out, out_sz, "%s", active_addr);
+    return true;
+}
+
 static bool qsl_build_json(const qsl_data_t *data, char *json_out, size_t json_out_sz)
 {
-    char qsl[64], rs[32], date[32], time[32], freq[64], mode[32], qth[128];
+    char qsl[64], rs[32], date[32], time[32], freq[64], mode[32], qth[128], fr[32];
 
+    if (!sign_build_escaped_mycall(fr, sizeof(fr))) return false;
     if (!json_escape_message((const uint8_t *)data->qsl, (int)strlen(data->qsl), qsl, sizeof(qsl))) return false;
     if (!json_escape_message((const uint8_t *)data->rs, (int)strlen(data->rs), rs, sizeof(rs))) return false;
     if (!json_escape_message((const uint8_t *)data->date, (int)strlen(data->date), date, sizeof(date))) return false;
@@ -1708,8 +1738,26 @@ static bool qsl_build_json(const qsl_data_t *data, char *json_out, size_t json_o
     if (!json_escape_message((const uint8_t *)data->qth, (int)strlen(data->qth), qth, sizeof(qth))) return false;
 
     if (snprintf(json_out, json_out_sz,
-                 "{\"QSL\":{\"C\":\"%s\",\"S\":\"%s\",\"D\":\"%s\",\"T\":\"%s\",\"F\":\"%s\",\"M\":\"%s\",\"P\":\"%s\"}}",
-                 qsl, rs, date, time, freq, mode, qth) >= (int)json_out_sz) {
+                 "{\"FR\":\"%s\",\"QSL\":{\"C\":\"%s\",\"S\":\"%s\",\"D\":\"%s\",\"T\":\"%s\",\"F\":\"%s\",\"M\":\"%s\",\"P\":\"%s\"}}",
+                 fr, qsl, rs, date, time, freq, mode, qth) >= (int)json_out_sz) {
+        return false;
+    }
+    return true;
+}
+
+static bool adv_build_json(const adv_data_t *data, char *json_out, size_t json_out_sz)
+{
+    char fr[32], name[128], bio[256], addr[64], addr_esc[128];
+
+    if (!sign_build_escaped_mycall(fr, sizeof(fr))) return false;
+    if (!sign_build_active_address(addr, sizeof(addr))) return false;
+    if (!json_escape_message((const uint8_t *)data->name, (int)strlen(data->name), name, sizeof(name))) return false;
+    if (!json_escape_message((const uint8_t *)data->bio, (int)strlen(data->bio), bio, sizeof(bio))) return false;
+    if (!json_escape_message((const uint8_t *)addr, (int)strlen(addr), addr_esc, sizeof(addr_esc))) return false;
+
+    if (snprintf(json_out, json_out_sz,
+                 "{\"FR\":\"%s\",\"ADV\":{\"N\":\"%s\",\"B\":\"%s\",\"A\":\"%s\"}}",
+                 fr, name, bio, addr_esc) >= (int)json_out_sz) {
         return false;
     }
     return true;
@@ -1815,7 +1863,127 @@ static bool qsl_finalize_and_sign(tty_t *ttyp, qsl_data_t *data)
     return sign_prepare_and_prompt_tx(ttyp, json_msg);
 }
 
+static bool adv_finalize_and_sign(tty_t *ttyp, adv_data_t *data)
+{
+    char json_msg[256];
+
+    if (!data->name[0] || !data->bio[0]) {
+        tty_write_str(ttyp, "ADV requires -name and -bio.\r\n");
+        return true;
+    }
+    if (!adv_build_json(data, json_msg, sizeof(json_msg))) {
+        tty_write_str(ttyp, "ADV payload is invalid or too long.\r\n");
+        return true;
+    }
+    return sign_prepare_and_prompt_tx(ttyp, json_msg);
+}
+
+static bool qsl_is_option_token(const char *s)
+{
+    if (!s) return false;
+    return !strcasecmp(s, "-rs") || !strcasecmp(s, "-date") || !strcasecmp(s, "-time") ||
+           !strcasecmp(s, "-freq") || !strcasecmp(s, "-mode") || !strcasecmp(s, "-qth");
+}
+
+static bool qsl_join_option_tokens(char *dst, size_t dst_sz, char *const *tokens, int start, int end)
+{
+    int k;
+
+    if (!dst || dst_sz == 0) return false;
+    dst[0] = '\0';
+    if (start >= end) return false;
+
+    for (k = start; k < end; k++) {
+        if (dst[0] && (strlen(dst) + 1) < dst_sz) {
+            strncat(dst, " ", dst_sz - strlen(dst) - 1);
+        }
+        if ((strlen(dst) + strlen(tokens[k])) >= dst_sz) return false;
+        strncat(dst, tokens[k], dst_sz - strlen(dst) - 1);
+    }
+    return dst[0] ? true : false;
+}
+
 static bool qsl_parse_args(char *args, qsl_data_t *out)
+{
+    char *tok[32];
+    int tok_n = 0;
+    int i = 0;
+    int j;
+
+    memset(out, 0, sizeof(*out));
+    tok[tok_n] = strtok(args, " ");
+    while (tok[tok_n] && tok_n + 1 < (int)(sizeof(tok) / sizeof(tok[0]))) {
+        tok_n++;
+        tok[tok_n] = strtok(NULL, " ");
+    }
+    if (tok_n == 0) return false;
+
+    j = 0;
+    while (j < tok_n && !qsl_is_option_token(tok[j])) j++;
+    {
+        char to_buf[sizeof(out->qsl)];
+        if (!qsl_join_option_tokens(to_buf, sizeof(to_buf), tok, 0, j)) return false;
+        qsl_upper_copy(out->qsl, sizeof(out->qsl), to_buf);
+    }
+    i = j;
+    while (i < tok_n) {
+        if (!strcasecmp(tok[i], "-rs")) {
+            int next = i + 1;
+            while (next < tok_n && !qsl_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(out->rs, sizeof(out->rs), tok, i + 1, next)) return false;
+            i = next;
+            continue;
+        }
+        if (!strcasecmp(tok[i], "-date")) {
+            int next = i + 1;
+            while (next < tok_n && !qsl_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(out->date, sizeof(out->date), tok, i + 1, next)) return false;
+            i = next;
+            continue;
+        }
+        if (!strcasecmp(tok[i], "-time")) {
+            int next = i + 1;
+            while (next < tok_n && !qsl_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(out->time, sizeof(out->time), tok, i + 1, next)) return false;
+            i = next;
+            continue;
+        }
+        if (!strcasecmp(tok[i], "-freq")) {
+            int next = i + 1;
+            while (next < tok_n && !qsl_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(out->freq, sizeof(out->freq), tok, i + 1, next)) return false;
+            i = next;
+            continue;
+        }
+        if (!strcasecmp(tok[i], "-mode")) {
+            char mode_buf[sizeof(out->mode)];
+            int next = i + 1;
+            while (next < tok_n && !qsl_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(mode_buf, sizeof(mode_buf), tok, i + 1, next)) return false;
+            qsl_upper_copy(out->mode, sizeof(out->mode), mode_buf);
+            i = next;
+            continue;
+        }
+        if (!strcasecmp(tok[i], "-qth")) {
+            int next = i + 1;
+            while (next < tok_n && !qsl_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(out->qth, sizeof(out->qth), tok, i + 1, next)) return false;
+            i = next;
+            continue;
+        }
+        return false;
+    }
+
+    return true;
+}
+
+static bool adv_is_option_token(const char *s)
+{
+    if (!s) return false;
+    return !strcasecmp(s, "-name") || !strcasecmp(s, "-bio");
+}
+
+static bool adv_parse_args(char *args, adv_data_t *out)
 {
     char *tok[32];
     int tok_n = 0;
@@ -1829,81 +1997,19 @@ static bool qsl_parse_args(char *args, qsl_data_t *out)
     }
     if (tok_n == 0) return false;
 
-    qsl_upper_copy(out->qsl, sizeof(out->qsl), tok[0]);
-    i = 1;
     while (i < tok_n) {
-        if (!strcasecmp(tok[i], "-rs")) {
-            if (i + 1 >= tok_n) return false;
-            strncpy(out->rs, tok[i + 1], sizeof(out->rs) - 1);
-            i += 2;
+        if (!strcasecmp(tok[i], "-name")) {
+            int next = i + 1;
+            while (next < tok_n && !adv_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(out->name, sizeof(out->name), tok, i + 1, next)) return false;
+            i = next;
             continue;
         }
-        if (!strcasecmp(tok[i], "-date")) {
-            char buf[32] = {0};
-            int k = 0;
-            int j = i + 1;
-            if (j >= tok_n) return false;
-            while (j < tok_n && tok[j][0] != '-' && k < 3) {
-                if (k > 0) strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
-                strncat(buf, tok[j], sizeof(buf) - strlen(buf) - 1);
-                j++;
-                k++;
-            }
-            if (k == 0) return false;
-            strncpy(out->date, buf, sizeof(out->date) - 1);
-            i = j;
-            continue;
-        }
-        if (!strcasecmp(tok[i], "-time")) {
-            char buf[32] = {0};
-            int k = 0;
-            int j = i + 1;
-            if (j >= tok_n) return false;
-            while (j < tok_n && tok[j][0] != '-' && k < 2) {
-                if (k > 0) strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
-                strncat(buf, tok[j], sizeof(buf) - strlen(buf) - 1);
-                j++;
-                k++;
-            }
-            if (k == 0) return false;
-            strncpy(out->time, buf, sizeof(out->time) - 1);
-            i = j;
-            continue;
-        }
-        if (!strcasecmp(tok[i], "-freq")) {
-            if (i + 1 >= tok_n) return false;
-            strncpy(out->freq, tok[i + 1], sizeof(out->freq) - 1);
-            i += 2;
-            continue;
-        }
-        if (!strcasecmp(tok[i], "-mode")) {
-            if (i + 1 >= tok_n) return false;
-            qsl_upper_copy(out->mode, sizeof(out->mode), tok[i + 1]);
-            i += 2;
-            continue;
-        }
-        if (!strcasecmp(tok[i], "-qth")) {
-            char *trim_p = NULL;
-            size_t qth_len = 0;
-            int j = i + 1;
-            if (j >= tok_n) return false;
-            out->qth[0] = '\0';
-            while (j < tok_n && tok[j][0] != '-') {
-                if ((strlen(out->qth) + strlen(tok[j]) + 2) >= sizeof(out->qth)) return false;
-                if (out->qth[0]) strncat(out->qth, " ", sizeof(out->qth) - strlen(out->qth) - 1);
-                strncat(out->qth, tok[j], sizeof(out->qth) - strlen(out->qth) - 1);
-                j++;
-            }
-            trim_p = out->qth;
-            while (*trim_p && isspace((unsigned char)*trim_p)) trim_p++;
-            if (trim_p != out->qth) memmove(out->qth, trim_p, strlen(trim_p) + 1);
-            qth_len = strlen(out->qth);
-            while (qth_len > 0 && isspace((unsigned char)out->qth[qth_len - 1])) {
-                out->qth[qth_len - 1] = '\0';
-                qth_len--;
-            }
-            if (out->qth[0] == '\0') return false;
-            i = j;
+        if (!strcasecmp(tok[i], "-bio")) {
+            int next = i + 1;
+            while (next < tok_n && !adv_is_option_token(tok[next])) next++;
+            if (!qsl_join_option_tokens(out->bio, sizeof(out->bio), tok, i + 1, next)) return false;
+            i = next;
             continue;
         }
         return false;
@@ -2060,7 +2166,9 @@ static bool sign_qsl_wizard_consume_char(tty_t *ttyp, int ch)
 static bool cmd_sign(tty_t *ttyp, uint8_t *buf, int len)
 {
     qsl_data_t qsl_data;
+    adv_data_t adv_data;
     char escaped_msg[CMD_BUF_LEN * 2 + 1];
+    char escaped_fr[32];
     char json_msg[256];
     char arg_copy[CMD_BUF_LEN + 1];
     uint8_t *p;
@@ -2083,8 +2191,22 @@ static bool cmd_sign(tty_t *ttyp, uint8_t *buf, int len)
             tty_write_str(ttyp, "Message contains unsupported control characters or is too long.\r\n");
             return true;
         }
-        snprintf(json_msg, sizeof(json_msg), "{\"msg\":\"%s\"}", escaped_msg);
+        if (!sign_build_escaped_mycall(escaped_fr, sizeof(escaped_fr))) {
+            tty_write_str(ttyp, "MYCALL contains unsupported control characters.\r\n");
+            return true;
+        }
+        snprintf(json_msg, sizeof(json_msg), "{\"FR\":\"%s\",\"MSG\":\"%s\"}", escaped_fr, escaped_msg);
         return sign_prepare_and_prompt_tx(ttyp, json_msg);
+    }
+
+    if (!strncasecmp((char *)p, "ADV", 3) && p[3] == ' ') {
+        p = skip_spaces(p + 3);
+        if (!*p) return false;
+
+        strncpy(arg_copy, (char *)p, sizeof(arg_copy) - 1);
+        arg_copy[sizeof(arg_copy) - 1] = '\0';
+        if (!adv_parse_args(arg_copy, &adv_data)) return false;
+        return adv_finalize_and_sign(ttyp, &adv_data);
     }
 
     if (!strncasecmp((char *)p, "QSL", 3) && (p[3] == '\0' || p[3] == ' ')) {

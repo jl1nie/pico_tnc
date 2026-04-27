@@ -128,6 +128,53 @@ static void qsl_value_set(char *dst, int dst_sz, const char *src)
     snprintf(dst, dst_sz, "%s", src);
 }
 
+static bool json_find_top_level_string(const char *json, const char *key, char *out, int out_sz)
+{
+    const char *p = json;
+    int depth = 0;
+    bool in_string = false;
+    bool esc = false;
+
+    if (!json || !key || !out || out_sz <= 0) return false;
+    out[0] = '\0';
+
+    while (*p) {
+        char ch = *p;
+        if (in_string) {
+            if (esc) esc = false;
+            else if (ch == '\\') esc = true;
+            else if (ch == '"') in_string = false;
+            p++;
+            continue;
+        }
+        if (ch == '"') {
+            if (depth == 1) {
+                char found_key[8];
+                const char *q = json_copy_string(p, found_key, sizeof(found_key));
+                const char *v;
+                if (!q) return false;
+                v = skip_ws(q);
+                if (*v == ':') {
+                    v = skip_ws(v + 1);
+                    if (!strcmp(found_key, key) && *v == '"') {
+                        if (!json_copy_string(v, out, out_sz)) return false;
+                        return true;
+                    }
+                }
+                p = q;
+                continue;
+            }
+            in_string = true;
+            p++;
+            continue;
+        }
+        if (ch == '{') depth++;
+        else if (ch == '}' && depth > 0) depth--;
+        p++;
+    }
+    return false;
+}
+
 bool qsl_card_parse(const char *json, qsl_card_t *card)
 {
     const char *p;
@@ -135,6 +182,9 @@ bool qsl_card_parse(const char *json, qsl_card_t *card)
     if (!json || !card) return false;
 
     memset(card, 0, sizeof(*card));
+    if (json_find_top_level_string(json, "FR", card->from_fr, sizeof(card->from_fr))) {
+        card->has_fr = true;
+    }
     p = find_qsl_object(json);
     if (!p) return false;
 
@@ -183,7 +233,33 @@ bool qsl_card_parse(const char *json, qsl_card_t *card)
     return false;
 }
 
-void qsl_card_render(tty_t *ttyp, const qsl_card_t *card, const char *from, const char *addr, const char *sig_b64, const char *status)
+static void card_write_wrapped45(tty_t *ttyp, const char *text)
+{
+    size_t len;
+    size_t off = 0;
+    char line[80];
+
+    if (!text) {
+        card_write_line(ttyp, "", NULL);
+        return;
+    }
+
+    len = strlen(text);
+    if (len == 0) {
+        card_write_line(ttyp, "", NULL);
+        return;
+    }
+
+    while (off < len) {
+        size_t chunk = len - off;
+        if (chunk > 45) chunk = 45;
+        snprintf(line, sizeof(line), "%.*s", (int)chunk, text + off);
+        card_write_line(ttyp, line, NULL);
+        off += chunk;
+    }
+}
+
+void qsl_card_render(tty_t *ttyp, const qsl_card_t *card, const char *from, const char *addr, const char *raw_data, const char *sig_b64, const char *status)
 {
     char line[80];
 
@@ -216,11 +292,11 @@ void qsl_card_render(tty_t *ttyp, const qsl_card_t *card, const char *from, cons
     }
     if (card->ext_n == 0) card_write_line(ttyp, "", NULL);
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
+    card_write_line(ttyp, "Raw Data", NULL);
+    card_write_wrapped45(ttyp, raw_data);
+    tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
     card_write_line(ttyp, "Signature", NULL);
-    snprintf(line, sizeof(line), "%.45s", sig_b64);
-    card_write_line(ttyp, line, NULL);
-    snprintf(line, sizeof(line), "%s", sig_b64 + 45);
-    card_write_line(ttyp, line, NULL);
+    card_write_wrapped45(ttyp, sig_b64);
     tty_write_str(ttyp, "  +------------------------------------------------+\r\n");
     card_write_line(ttyp, "Signed ID (Mona address)", "><");
     card_write_line(ttyp, addr, "><");
