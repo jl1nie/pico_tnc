@@ -143,6 +143,7 @@ static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
     const char *addr;
     qsl_card_t card;
     char from[16];
+    char from_display[40];
 
     info_off = ax25_info_offset(tp->data, tp->data_cnt);
     if (info_off < 0 || info_off >= tp->data_cnt - 2) return;
@@ -185,7 +186,12 @@ static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
 
     if (qsl_card_parse(json_msg, &card) && card.has_qsl) {
         ax25_addr_to_ascii(tp->data + 7, from, sizeof(from));
-        qsl_card_render(ttyp, &card, from, addr, sig_b64, "OK");
+        if (card.has_fr && card.from_fr[0]) {
+            snprintf(from_display, sizeof(from_display), "%s", card.from_fr);
+        } else {
+            snprintf(from_display, sizeof(from_display), "%s   *UNSIGNED", from);
+        }
+        qsl_card_render(ttyp, &card, from_display, addr, json_msg, sig_b64, "OK");
     }
 }
 

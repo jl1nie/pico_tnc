@@ -137,13 +137,13 @@
   - 署名構造
     - {JSON}署名 の形で、作成されたままのバイト列の維持を絶対厳守とします。  
       作成後は編集不可能で、1bitでも変化や欠損したら署名は無効になり、修復は極めて困難です。
-    - {"MSG":"フリーテキスト"}署名～  
-    {"msg":"Welcome to the frontier. New tech, new rules, and a brand-new era. The future is no longer a dream; it's right here."}H/R5VR69VHUZRPVIRzYDhu8G48bAM7EM+ZSRrgk+XAIHAP1N6/cELLtYa91g05LEdsQZNwzwhre6N2oI91gbCtQ=
-    - {"QSL":{QSL構造体っぽいデータ}}署名～  
-    {"QSL":{"C":"JS1YCP/1","S":"599","D":"20260426","T":"0430JST","F":"433.321","M":"D-STAR_DV","P":"Akihabara Tokyo"}}HzIsHJ7kmdwuePXDo+yak1yY6Nq3koMtGmGKoBTg+QlLAK1q95G/uAocbfyxpM8R0XM/H8R7NLztB5cNKprBvSk=
+    - {"FR":"JA1UMW","MSG":"フリーテキスト"}署名～  
+    {"FR":"JA1UMW","MSG":"Welcome to the frontier. New tech, new rules, and a brand-new era. The future is no longer a dream; it's right here."}H/R5VR69VHUZRPVIRzYDhu8G48bAM7EM+ZSRrgk+XAIHAP1N6/cELLtYa91g05LEdsQZNwzwhre6N2oI91gbCtQ=
+    - {"FR":"JA1UMW","QSL":{QSL構造体っぽいデータ}}署名～  
+    {"FR":"JA1UMW","QSL":{"C":"JS1YCP/1","S":"599","D":"20260426","T":"0430JST","F":"433.321","M":"D-STAR_DV","P":"Akihabara Tokyo"}}HzIsHJ7kmdwuePXDo+yak1yY6Nq3koMtGmGKoBTg+QlLAK1q95G/uAocbfyxpM8R0XM/H8R7NLztB5cNKprBvSk=
+    - ADV:{アドレス事前広告用メッセージ構造体} 署名～  
+    {"FR":"JA1UMW","ADV":{"N":"Daisuke/CQAKIBA","B":"Testing the digital signature system using monacoin","A":"MLA4htCpCC9APoi8Yk6LZMT8aAwFMnMEUo"}}Hxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=
     - 他、必要であればどうにでも作れます。
-    - 今のところAX.25を前提とし、送信者名やネットワーク情報はパケットヘッダから使用します  
-      (※セキュリティ的には弱点なので、署名構造内に含める必要があります。現時点では未決定です。)
   - 何故JSONなのか
     - シリアライズやエンコーディング仕様がわかりやすい
     - 非常に普及していて、誰でも知っていて、見れば意味がわかる
