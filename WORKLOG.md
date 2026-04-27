@@ -1628,3 +1628,58 @@ Revert actual code behavior for `FR` to use runtime `MYCALL` again, while keepin
 
 ### Remaining risks / TODOs
 - None newly introduced beyond existing SDK build-environment limitation.
+
+## 2026-04-27
+
+### Request
+Rework `sign_build_active_address()` to honor `param.mona_privkey_compressed` via keyslot-based derivation, unify signing/ADV-address settings source, add an ADV address consistency verification point, and document a manual uncompressed-WIF verification procedure.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- Added shared helper `sign_fill_keyslot_from_param()` and switched signing flow (`mona_keyslot_sign_message`) and ADV active-address derivation to use the same keyslot source (`secret`, `compressed`, `active_type`).
+- `sign_build_active_address()` now uses `mona_keyslot_get_active_address()` (keyslot-based), so address derivation reflects compressed/uncompressed key settings.
+- `sign_check_prerequisites()` and QSL preview address path were aligned to keyslot active-address derivation.
+- Added verification point in `sign adv`: after JSON assembly, firmware checks that `ADV.A` marker matches the currently active signing address; mismatch aborts signing.
+- Queue sizes/constants unchanged; text output paths add only short validation messages and one in-memory marker check, with no expected queue/RAM behavior change.
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- `sign adv` address-marker verification currently uses substring matching (`"A":"<addr>"`) against generated JSON text. It is sufficient for current fixed JSON layout but should be revisited if ADV JSON serialization format changes.
+
+### Manual test procedure (uncompressed WIF consistency check)
+1. Import uncompressed WIF:
+   - `privkey set <uncompressed_wif>`
+2. Confirm key mode/type:
+   - `privkey` output should show `compressed: false`.
+   - Note active type (`p2pkh`/`p2sh`/`p2wpkh`).
+3. Run:
+   - `sign adv -name test -bio check`
+4. Verify `ADV.A` in emitted signed payload equals ADDRESS shown by `sign` readiness/status for the same active type.
+5. Copy emitted payload+signature into PC-side verifier and confirm verification succeeds for that `ADV.A` address.
+6. Change active type (if supported in current config), repeat step 3-5, and confirm `ADV.A` tracks the selected active type while staying consistent with verification results.
+
+## 2026-04-27
+
+### Request
+In `cmd_sign()` MSG path, check `snprintf` return value and abort safely when JSON construction is truncated; add a truncation-specific error message and review similar fixed-buffer `snprintf` paths in other `sign` subcommands.
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `WORKLOG.md`
+
+### Behavior changes
+- `sign msg` now validates `snprintf` return value when composing sign-target JSON (`int n`).
+- If JSON composition fails/truncates (`n < 0` or `n >= sizeof(json_msg)`), it now reports a dedicated truncation error and aborts without signing.
+- Added matching `n < 0 || n >= size` checks to fixed-buffer JSON builders used by `sign qsl` and `sign adv` paths for consistency.
+- Queue sizes/constants unchanged; only defensive error handling was added in text/JSON assembly paths, so no expected RAM or queue-behavior impact.
+
+### Validation status
+- Build attempted with `cmake -S . -B build && cmake --build build -j4`; build is not possible in this environment because `PICO_SDK_PATH` (or `PICO_SDK_FETCH_FROM_GIT`) is not configured.
+
+### Remaining risks / TODOs
+- None newly introduced beyond existing SDK build-environment limitation.
