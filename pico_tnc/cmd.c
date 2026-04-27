@@ -118,7 +118,7 @@ static mona_addr_type_t mona_param_to_addr_type(uint8_t t);
 static uint8_t mona_addr_type_to_param(mona_addr_type_t t);
 static char const *mona_param_type_name(uint8_t t);
 static bool sign_check_prerequisites(tty_t *ttyp, bool print_status, bool print_messages);
-static const char *sign_active_address(const mona_address_info_t *addrs);
+static bool sign_fill_keyslot_from_param(mona_keyslot_t *slot);
 
 typedef struct {
     tty_t *ttyp;
@@ -1386,7 +1386,6 @@ static bool json_escape_message(const uint8_t *in, int in_len, char *out, int ou
 static bool sign_prepare_and_prompt_tx(tty_t *ttyp, const char *json_msg)
 {
     mona_keyslot_t slot;
-    mona_address_info_t addrs;
     mona_err_t err;
     uint64_t t0_us;
     uint64_t t1_us;
@@ -1397,16 +1396,15 @@ static bool sign_prepare_and_prompt_tx(tty_t *ttyp, const char *json_msg)
     qsl_card_t card;
     uint8_t from_u8[16];
     char from[16];
+    char addr_preview_buf[64];
     const char *addr_preview = "";
     if (!sign_check_prerequisites(ttyp, false, true)) return true;
 
     mona_backend_minimal_init();
-
-    memset(&slot, 0, sizeof(slot));
-    memcpy(slot.secret, param.mona_privkey, sizeof(slot.secret));
-    slot.valid = param.mona_privkey_valid ? true : false;
-    slot.compressed = param.mona_privkey_compressed ? true : false;
-    slot.active_type = mona_param_to_addr_type(param.mona_active_type);
+    if (!sign_fill_keyslot_from_param(&slot)) {
+        tty_write_str(ttyp, "No private key. Run \"privkey gen\" or \"privkey set\" first.\r\n");
+        return true;
+    }
 
     tty_write_str(ttyp, "Digital signature calculation in progress... ");
     t0_us = time_us_64();
@@ -1443,9 +1441,8 @@ static bool sign_prepare_and_prompt_tx(tty_t *ttyp, const char *json_msg)
     }
 
     if (qsl_card_parse(json_msg, &card) && card.has_qsl) {
-        memset(&addrs, 0, sizeof(addrs));
-        if (mona_keypair_from_secret(slot.secret, &addrs) == MONA_OK) {
-            addr_preview = sign_active_address(&addrs);
+        if (mona_keyslot_get_active_address(&slot, addr_preview_buf, sizeof(addr_preview_buf)) == MONA_OK) {
+            addr_preview = addr_preview_buf;
         }
         memset(from_u8, 0, sizeof(from_u8));
         from_u8[callsign2ascii(from_u8, &param.mycall)] = '\0';
@@ -1459,12 +1456,16 @@ static bool sign_prepare_and_prompt_tx(tty_t *ttyp, const char *json_msg)
     return true;
 }
 
-static const char *sign_active_address(const mona_address_info_t *addrs)
+static bool sign_fill_keyslot_from_param(mona_keyslot_t *slot)
 {
-    mona_addr_type_t type = mona_param_to_addr_type(param.mona_active_type);
-    if (type == MONA_ADDR_P2SH) return addrs->addr_P;
-    if (type == MONA_ADDR_P2WPKH) return addrs->addr_mona1;
-    return addrs->addr_M;
+    if (!slot) return false;
+    if (!param.mona_privkey_valid) return false;
+    memset(slot, 0, sizeof(*slot));
+    memcpy(slot->secret, param.mona_privkey, sizeof(slot->secret));
+    slot->valid = true;
+    slot->compressed = param.mona_privkey_compressed ? true : false;
+    slot->active_type = mona_param_to_addr_type(param.mona_active_type);
+    return true;
 }
 
 static bool sign_check_prerequisites(tty_t *ttyp, bool print_status, bool print_messages)
@@ -1474,9 +1475,9 @@ static bool sign_check_prerequisites(tty_t *ttyp, bool print_status, bool print_
     bool ready = has_privkey && has_route;
 
     if (print_status) {
-        mona_address_info_t addrs;
-        mona_err_t err = MONA_ERR_ARGS;
+        mona_keyslot_t slot;
         const char *addr_text = "(not set)";
+        char addr_buf[64];
 
         tty_write_str(ttyp, "MYCALL  : ");
         if (param.mycall.call[0]) tty_write_str(ttyp, param.mycall.call);
@@ -1499,10 +1500,11 @@ static bool sign_check_prerequisites(tty_t *ttyp, bool print_status, bool print_
 
         tty_write_str(ttyp, "ADDRESS : ");
         if (has_privkey) {
-            memset(&addrs, 0, sizeof(addrs));
             mona_backend_minimal_init();
-            err = mona_keypair_from_secret(param.mona_privkey, &addrs);
-            if (err == MONA_OK) addr_text = sign_active_address(&addrs);
+            if (sign_fill_keyslot_from_param(&slot) &&
+                mona_keyslot_get_active_address(&slot, addr_buf, sizeof(addr_buf)) == MONA_OK) {
+                addr_text = addr_buf;
+            }
             else addr_text = "(calculation failed)";
         }
         tty_write_str(ttyp, addr_text);
@@ -1711,22 +1713,17 @@ static bool sign_build_escaped_mycall(char *out, size_t out_sz)
 
 static bool sign_build_active_address(char *out, size_t out_sz)
 {
-    mona_address_info_t addrs;
-    const char *active_addr;
+    mona_keyslot_t slot;
 
-    if (!param.mona_privkey_valid) return false;
+    if (!sign_fill_keyslot_from_param(&slot)) return false;
     mona_backend_minimal_init();
-    memset(&addrs, 0, sizeof(addrs));
-    if (mona_keypair_from_secret(param.mona_privkey, &addrs) != MONA_OK) return false;
-    active_addr = sign_active_address(&addrs);
-    if (!active_addr || !active_addr[0]) return false;
-    snprintf(out, out_sz, "%s", active_addr);
-    return true;
+    return mona_keyslot_get_active_address(&slot, out, out_sz) == MONA_OK;
 }
 
 static bool qsl_build_json(const qsl_data_t *data, char *json_out, size_t json_out_sz)
 {
     char qsl[64], rs[32], date[32], time[32], freq[64], mode[32], qth[128], fr[32];
+    int n;
 
     if (!sign_build_escaped_mycall(fr, sizeof(fr))) return false;
     if (!json_escape_message((const uint8_t *)data->qsl, (int)strlen(data->qsl), qsl, sizeof(qsl))) return false;
@@ -1737,9 +1734,10 @@ static bool qsl_build_json(const qsl_data_t *data, char *json_out, size_t json_o
     if (!json_escape_message((const uint8_t *)data->mode, (int)strlen(data->mode), mode, sizeof(mode))) return false;
     if (!json_escape_message((const uint8_t *)data->qth, (int)strlen(data->qth), qth, sizeof(qth))) return false;
 
-    if (snprintf(json_out, json_out_sz,
+    n = snprintf(json_out, json_out_sz,
                  "{\"FR\":\"%s\",\"QSL\":{\"C\":\"%s\",\"S\":\"%s\",\"D\":\"%s\",\"T\":\"%s\",\"F\":\"%s\",\"M\":\"%s\",\"P\":\"%s\"}}",
-                 fr, qsl, rs, date, time, freq, mode, qth) >= (int)json_out_sz) {
+                 fr, qsl, rs, date, time, freq, mode, qth);
+    if (n < 0 || n >= (int)json_out_sz) {
         return false;
     }
     return true;
@@ -1748,6 +1746,7 @@ static bool qsl_build_json(const qsl_data_t *data, char *json_out, size_t json_o
 static bool adv_build_json(const adv_data_t *data, char *json_out, size_t json_out_sz)
 {
     char fr[32], name[128], bio[256], addr[64], addr_esc[128];
+    int n;
 
     if (!sign_build_escaped_mycall(fr, sizeof(fr))) return false;
     if (!sign_build_active_address(addr, sizeof(addr))) return false;
@@ -1755,9 +1754,10 @@ static bool adv_build_json(const adv_data_t *data, char *json_out, size_t json_o
     if (!json_escape_message((const uint8_t *)data->bio, (int)strlen(data->bio), bio, sizeof(bio))) return false;
     if (!json_escape_message((const uint8_t *)addr, (int)strlen(addr), addr_esc, sizeof(addr_esc))) return false;
 
-    if (snprintf(json_out, json_out_sz,
+    n = snprintf(json_out, json_out_sz,
                  "{\"FR\":\"%s\",\"ADV\":{\"N\":\"%s\",\"B\":\"%s\",\"A\":\"%s\"}}",
-                 fr, name, bio, addr_esc) >= (int)json_out_sz) {
+                 fr, name, bio, addr_esc);
+    if (n < 0 || n >= (int)json_out_sz) {
         return false;
     }
     return true;
@@ -1866,6 +1866,9 @@ static bool qsl_finalize_and_sign(tty_t *ttyp, qsl_data_t *data)
 static bool adv_finalize_and_sign(tty_t *ttyp, adv_data_t *data)
 {
     char json_msg[256];
+    char active_addr[64];
+    char addr_marker[80];
+    int n;
 
     if (!data->name[0] || !data->bio[0]) {
         tty_write_str(ttyp, "ADV requires -name and -bio.\r\n");
@@ -1873,6 +1876,15 @@ static bool adv_finalize_and_sign(tty_t *ttyp, adv_data_t *data)
     }
     if (!adv_build_json(data, json_msg, sizeof(json_msg))) {
         tty_write_str(ttyp, "ADV payload is invalid or too long.\r\n");
+        return true;
+    }
+    if (!sign_build_active_address(active_addr, sizeof(active_addr))) {
+        tty_write_str(ttyp, "ADV payload address check failed.\r\n");
+        return true;
+    }
+    n = snprintf(addr_marker, sizeof(addr_marker), "\"A\":\"%s\"", active_addr);
+    if (n < 0 || n >= (int)sizeof(addr_marker) || !strstr(json_msg, addr_marker)) {
+        tty_write_str(ttyp, "ADV payload address mismatch with active sign setting.\r\n");
         return true;
     }
     return sign_prepare_and_prompt_tx(ttyp, json_msg);
@@ -2184,6 +2196,8 @@ static bool cmd_sign(tty_t *ttyp, uint8_t *buf, int len)
     p = skip_spaces(buf);
 
     if (!strncasecmp((char *)p, "MSG", 3) && p[3] == ' ') {
+        int n;
+
         p = skip_spaces(p + 3);
         if (!*p) return false;
 
@@ -2195,7 +2209,11 @@ static bool cmd_sign(tty_t *ttyp, uint8_t *buf, int len)
             tty_write_str(ttyp, "MYCALL contains unsupported control characters.\r\n");
             return true;
         }
-        snprintf(json_msg, sizeof(json_msg), "{\"FR\":\"%s\",\"MSG\":\"%s\"}", escaped_fr, escaped_msg);
+        n = snprintf(json_msg, sizeof(json_msg), "{\"FR\":\"%s\",\"MSG\":\"%s\"}", escaped_fr, escaped_msg);
+        if (n < 0 || n >= (int)sizeof(json_msg)) {
+            tty_write_str(ttyp, "Message is too long to safely build sign-target JSON.\r\n");
+            return true;
+        }
         return sign_prepare_and_prompt_tx(ttyp, json_msg);
     }
 
