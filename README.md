@@ -44,6 +44,7 @@ This TNC has same functionality as WB8WGA's PIC TNC.
 - `sign msg <text>` : sign `{"FR":"<MYCALL>","MSG":"<text>"}` and append base64 signature, then prepare AX.25 UI-frame TX with Enter/ESC confirmation
 - `sign adv -name <name> -bio <bio>` : sign `{"FR":"<MYCALL>","ADV":{"N":"<name>","B":"<bio>","A":"<active_address>"}}` and append base64 signature, then prepare AX.25 UI-frame TX with Enter/ESC confirmation
 - `sign qsl ...` : sign QSL JSON payload (`{"FR":"<MYCALL>","QSL":{"C","S","D","T","F","M","P"}}`) and prepare AX.25 UI-frame TX; supports argument form and no-arg wizard form (each option value may include spaces and is read until the next `-option`)
+- `sign recovery {JSON}<signature>` : inject a manually typed signed payload into the same signature-recovery path used for received packets (for debugging receive-side behavior)
 - `system usb_bootloader` : guarded reboot to USB BOOTSEL mode (requires `Y`, `E`, `S`, `Enter` in order within 10 seconds)
 - `termtest` : raw terminal inspection mode; prints received bytes in hex/labels and exits on `Ctrl+C`
 
