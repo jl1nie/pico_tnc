@@ -128,10 +128,8 @@ static int ax25_addr_to_ascii(const uint8_t *addr, char *out, int out_sz)
     return n;
 }
 
-static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
+static void display_signature_recovery_payload(tty_t *ttyp, const uint8_t *payload, int payload_len, const char *from_fallback)
 {
-    int info_off;
-    int info_len;
     int json_end;
     int sig_len;
     char json_msg[DATA_LEN + 1];
@@ -142,24 +140,21 @@ static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
     uint64_t t1_us;
     const char *addr;
     qsl_card_t card;
-    char from[16];
     char from_display[40];
 
-    info_off = ax25_info_offset(tp->data, tp->data_cnt);
-    if (info_off < 0 || info_off >= tp->data_cnt - 2) return;
-    info_len = tp->data_cnt - 2 - info_off; // exclude FCS
-    if (info_len <= 0 || !json_object_end(tp->data + info_off, info_len, &json_end)) return;
+    if (!payload || payload_len <= 0) return;
+    if (!json_object_end(payload, payload_len, &json_end)) return;
 
-    sig_len = info_len - json_end;
+    sig_len = payload_len - json_end;
     if (sig_len <= 0) return;
     if (sig_len != SIGNATURE_B64_LEN) {
         tty_write_str(ttyp, "Signature error: invalid signature length\r\n");
         return;
     }
 
-    memcpy(json_msg, tp->data + info_off, json_end);
+    memcpy(json_msg, payload, json_end);
     json_msg[json_end] = '\0';
-    memcpy(sig_b64, tp->data + info_off + json_end, sig_len);
+    memcpy(sig_b64, payload + json_end, sig_len);
     sig_b64[sig_len] = '\0';
 
     tty_write_str(ttyp, "Digital signature calculation in progress... ");
@@ -185,14 +180,34 @@ static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
     tty_write_str(ttyp, "\r\n");
 
     if (qsl_card_parse(json_msg, &card) && card.has_qsl) {
-        ax25_addr_to_ascii(tp->data + 7, from, sizeof(from));
         if (card.has_fr && card.from_fr[0]) {
             snprintf(from_display, sizeof(from_display), "%s", card.from_fr);
         } else {
-            snprintf(from_display, sizeof(from_display), "%s   *UNSIGNED", from);
+            snprintf(from_display, sizeof(from_display), "%s   *UNSIGNED",
+                     (from_fallback && from_fallback[0]) ? from_fallback : "*UNKNOWN*");
         }
         qsl_card_render(ttyp, &card, from_display, addr, json_msg, sig_b64, "OK");
     }
+}
+
+void decode_signature_recovery_inject(tty_t *ttyp, const uint8_t *payload, int payload_len)
+{
+    display_signature_recovery_payload(ttyp, payload, payload_len, "*MANUAL*");
+}
+
+static void display_signature_recovery(tty_t *ttyp, tnc_t *tp)
+{
+    int info_off;
+    int info_len;
+    char from[16];
+
+    info_off = ax25_info_offset(tp->data, tp->data_cnt);
+    if (info_off < 0 || info_off >= tp->data_cnt - 2) return;
+    info_len = tp->data_cnt - 2 - info_off; // exclude FCS
+    if (info_len <= 0) return;
+
+    ax25_addr_to_ascii(tp->data + 7, from, sizeof(from));
+    display_signature_recovery_payload(ttyp, tp->data + info_off, info_len, from);
 }
 
 static void display_packet(tty_t *ttyp, tnc_t *tp)

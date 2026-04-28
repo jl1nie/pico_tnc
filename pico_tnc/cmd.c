@@ -48,6 +48,7 @@ See LICENSE and LICENSE-3RD-PARTY for details.
 #include "tty.h"
 #include "flash.h"
 #include "receive.h"
+#include "decode.h"
 #include "beacon.h"
 #include "help.h"
 #include "unproto.h"
@@ -2235,6 +2236,14 @@ static bool cmd_sign(tty_t *ttyp, uint8_t *buf, int len)
         arg_copy[sizeof(arg_copy) - 1] = '\0';
         if (!qsl_parse_args(arg_copy, &qsl_data)) return false;
         return qsl_finalize_and_sign(ttyp, &qsl_data);
+    }
+
+    if (!strncasecmp((char *)p, "RECOVERY", 8) && (p[8] == '\0' || p[8] == ' ')) {
+        p = skip_spaces(p + 8);
+        if (!*p) return false;
+
+        decode_signature_recovery_inject(ttyp, p, (int)strlen((char *)p));
+        return true;
     }
 
     return false;

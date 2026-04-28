@@ -2,6 +2,36 @@
 
 This file tracks implementation work, validation, and remaining risks.
 
+## 2026-04-27
+
+### Summary
+デバッグ用途として、受信パケットなしで署名リカバリ処理を再現できる `sign recovery {JSON}<署名>` コマンドを追加。
+
+### Files changed
+- `pico_tnc/cmd.c`
+- `pico_tnc/decode.c`
+- `pico_tnc/decode.h`
+- `pico_tnc/help.c`
+- `README.md`
+- `README_JP.md`
+- `WORKLOG.md`
+
+### Behavior changes
+- `sign recovery ...` で手入力した `{JSON}+base64署名(88文字)` を受信時と同じ検証表示処理へ投入可能にした。
+- 受信経路の署名検証ロジックを共通化し、無線受信時の動作は維持したままコマンド経由でも同一の表示（署名検証・QSLカード描画）を利用する。
+- Help/README (EN/JP) に新コマンドを追記。
+- RAM/queue impact note: 既存バッファ再利用のみで固定RAM増加なし、キューサイズ変更なし。
+
+### Validation status
+- Build attempted with:
+  - `cmake -S . -B build`
+  - `cmake --build build -j4`
+- In this environment, firmware build cannot complete because Pico SDK path is not configured (`PICO_SDK_PATH` missing).
+
+### Remaining risks / TODO
+- `sign recovery` は受信AX.25ヘッダを持たないため、`FR` 欠落QSLの送信元表示は `*MANUAL*` フォールバックとなる。
+- 実機で `sign recovery` と通常受信表示の差分（改行・タイミング）を最終確認する必要あり。
+
 ## 2026-04-22
 
 
