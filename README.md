@@ -66,7 +66,7 @@ This TNC has same functionality as WB8WGA's PIC TNC.
 ## How to build
 
 ```
-git clone https://github.com/amedes/pico_tnc.git
+git clone https://github.com/CQAKIBA/pico_tnc.git
 cd pico_tnc
 mkdir build
 cd build
